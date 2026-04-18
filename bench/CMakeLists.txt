@@ -3,6 +3,29 @@
 # every future optimization is measured against.
 
 include(FetchContent)
+
+# Optional libpfm4 integration: if the dev headers are present we let
+# Google Benchmark use them for --benchmark_perf_counters=... . That
+# gives us machine-independent signals (INSTRUCTIONS, BRANCHES,
+# BRANCH-MISSES, CYCLES, CACHE-*), which beat wall-clock ns for
+# cross-machine comparability.
+#
+# To install on Debian/Ubuntu:  sudo apt install libpfm4-dev
+# And ensure PMU events are readable:
+#   sudo sysctl kernel.perf_event_paranoid=1
+find_path(SWIFTFIX_LIBPFM_INCLUDE_DIR perfmon/pfmlib.h)
+find_library(SWIFTFIX_LIBPFM_LIBRARY NAMES pfm)
+if(SWIFTFIX_LIBPFM_INCLUDE_DIR AND SWIFTFIX_LIBPFM_LIBRARY)
+    set(BENCHMARK_ENABLE_LIBPFM ON CACHE BOOL "" FORCE)
+    message(STATUS "  libpfm4 headers:     ${SWIFTFIX_LIBPFM_INCLUDE_DIR}")
+    message(STATUS "  libpfm4 library:     ${SWIFTFIX_LIBPFM_LIBRARY}")
+    message(STATUS "  perf counters:       enabled (use --benchmark_perf_counters=...)")
+else()
+    set(BENCHMARK_ENABLE_LIBPFM OFF CACHE BOOL "" FORCE)
+    message(STATUS "  libpfm4 headers:     NOT FOUND")
+    message(STATUS "  perf counters:       disabled — install libpfm4-dev to enable")
+endif()
+
 FetchContent_Declare(
     googlebenchmark
     GIT_REPOSITORY https://github.com/google/benchmark.git

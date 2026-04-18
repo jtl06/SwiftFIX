@@ -20,7 +20,21 @@
       "Bash(scripts/build.sh)",
       "Bash(scripts/build.sh --clean --clang)",
       "Bash(scripts/bench.sh --benchmark_min_time=0.2s)",
-      "Bash(cmake --build build/release --target swiftfix_bench)"
+      "Bash(cmake --build build/release --target swiftfix_bench)",
+      "Bash(python3 corpus/generate.py --bulk 100 --seed 42)",
+      "Bash(python3 corpus/generate.py --bulk 1000 --seed 42)",
+      "Bash(SWIFTFIX_CORPUS=\"$\\(pwd\\)/corpus/bulk\" scripts/bench.sh --benchmark_min_time=0.5s --benchmark_repetitions=5)",
+      "Bash(SWIFTFIX_CORPUS=\"$\\(pwd\\)/corpus/bulk\" scripts/bench.sh --benchmark_min_time=0.5s)",
+      "Bash(SWIFTFIX_CORPUS=/home/jtl/Documents/SwiftFIX/corpus/bulk.stream scripts/bench.sh --benchmark_min_time=0.1s --benchmark_repetitions=3)",
+      "Bash(scripts/bench.sh --benchmark_min_time=0.05s --benchmark_repetitions=3)",
+      "Bash(dpkg -l)",
+      "Bash(dpkg -l libpfm4-dev)",
+      "Bash(sudo apt-get *)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(e['command'][:300]\\) for e in data if 'quickfix_shim' in e['file']][:1]\")",
+      "Bash(scripts/build.sh --clang)",
+      "Bash(scripts/bench.sh --benchmark_perf_counters=INSTRUCTIONS,BRANCHES,BRANCH-MISSES,CACHE-REFERENCES,CACHE-MISSES,CYCLES --benchmark_repetitions=10 --benchmark_min_time=0.2s)",
+      "Bash(git -C /home/jtl/Documents/SwiftFIX rev-parse --short HEAD)",
+      "Bash(lscpu)"
     ]
   }
 }

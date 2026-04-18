@@ -11,7 +11,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build/release"
 BENCH_BIN="${BUILD_DIR}/bench/swiftfix_bench"
 RESULTS_DIR="${REPO_ROOT}/bench/results"
-CORPUS_DIR="${REPO_ROOT}/corpus/valid"
+
+# Corpus selection: caller can override via SWIFTFIX_CORPUS env var.
+# Point it at corpus/bulk.stream for the stream-parse benchmark.
+# Defaults to the canonical per-file set.
+CORPUS_DIR="${SWIFTFIX_CORPUS:-${REPO_ROOT}/corpus/valid}"
 
 if [[ ! -x "${BENCH_BIN}" ]]; then
     echo "Bench binary missing; running scripts/build.sh first."

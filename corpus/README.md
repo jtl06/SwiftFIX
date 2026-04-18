@@ -3,25 +3,37 @@
 Raw FIX messages used by tests, benchmarks, and the scalar-vs-SIMD
 equivalence check (once that lands in phase 2).
 
-## On-disk format
+## On-disk formats
 
-One FIX frame per file. Raw bytes — **do not substitute <SOH> (`0x01`) with
-any visible placeholder**. The bench harness and tests read these bytes
-verbatim and feed them into QuickFIX.
+Two shapes, depending on use:
 
-Files with no extension are the convention. `.bin` is acceptable.
+- **Per-file corpora** (`valid/`, `truncated/`, `bad_*`, etc.): one FIX
+  frame per file, raw bytes. Tests and correctness checks use these —
+  one input file = one expected parse result.
+- **Stream corpus** (`bulk.stream`): many frames concatenated back-to-back
+  into a single binary blob, matching how FIX looks on the wire
+  (continuous TCP bytes, messages demarcated by `8=.../9=<n>/10=cksm`).
+  The bench harness feeds this through `FIX::Parser`, which is the stock
+  stream-splitting path.
+
+**Do not substitute <SOH> (`0x01`) with any visible placeholder** in
+either shape. The tools read bytes verbatim.
+
+Files with no extension are the convention for per-file corpora. `.bin`
+is acceptable.
 
 ## Directory layout
 
-| Directory            | What's in it                                          |
-|----------------------|-------------------------------------------------------|
-| `valid/`             | Well-formed frames every scanner must accept          |
-| `truncated/`         | Frames cut off mid-tag / mid-value                    |
-| `bad_checksum/`      | Header looks fine, tag 10 (CheckSum) is wrong         |
-| `bad_bodylength/`    | Tag 9 value disagrees with actual body byte count     |
-| `repeated_tags/`     | Same tag present multiple times (valid for groups)    |
-| `rawdata/`           | Embedded-binary edge cases (tag 95/96). See           |
-|                      | `docs/embedded_data.md`                               |
+| Path                  | What's in it                                          |
+|-----------------------|-------------------------------------------------------|
+| `valid/`              | Well-formed frames every scanner must accept          |
+| `truncated/`          | Frames cut off mid-tag / mid-value                    |
+| `bad_checksum/`       | Header looks fine, tag 10 (CheckSum) is wrong         |
+| `bad_bodylength/`     | Tag 9 value disagrees with actual body byte count     |
+| `repeated_tags/`      | Same tag present multiple times (valid for groups)    |
+| `rawdata/`            | Embedded-binary edge cases (tag 95/96). See           |
+|                       | `docs/embedded_data.md`                               |
+| `bulk.stream` *(file)*| Concatenated procedurally-generated frames for bench  |
 
 ## Generating the canonical `valid/` set
 
@@ -36,6 +48,25 @@ python3 corpus/generate.py
 This recomputes tag 9 (`BodyLength`) and tag 10 (`CheckSum`) so every
 written frame is well-formed. Commit both `generate.py` and the regenerated
 bytes so the corpus is reproducible from the script alone.
+
+## Generating the bulk stream
+
+```
+python3 corpus/generate.py --bulk 1000 --seed 42
+```
+
+Writes `corpus/bulk.stream` — N procedurally-varied frames concatenated
+into one file, using a seeded RNG so runs are reproducible. Point the
+bench at it:
+
+```
+SWIFTFIX_CORPUS=corpus/bulk.stream scripts/bench.sh
+```
+
+The harness auto-detects: if `SWIFTFIX_CORPUS` is a file, it runs the
+stream-parse benchmark (`FIX::Parser` does the splitting); if it's a
+directory, it runs the per-file benchmark (already-split frames fed
+straight into `Message::setString`).
 
 ## Adding new messages
 

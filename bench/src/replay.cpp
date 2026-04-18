@@ -30,4 +30,16 @@ std::vector<CorpusMessage> load_corpus(const std::filesystem::path& dir) {
     return out;
 }
 
+std::string load_stream(const std::filesystem::path& file) {
+    if (!std::filesystem::is_regular_file(file)) {
+        std::ostringstream err;
+        err << "stream file not found: " << file;
+        throw std::runtime_error(err.str());
+    }
+    std::ifstream in(file, std::ios::binary);
+    std::ostringstream buf;
+    buf << in.rdbuf();
+    return buf.str();
+}
+
 }  // namespace swiftfix::bench
