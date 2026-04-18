@@ -1,0 +1,48 @@
+name: bench
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths:
+      - "preparser/**"
+      - "integration/**"
+      - "bench/**"
+      - "corpus/**"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - ".github/workflows/bench.yml"
+
+# This workflow intentionally runs on a fixed self-hosted runner so cycle
+# counts are comparable across runs. The label 'swiftfix-bench-host' must
+# be provisioned with a CPU whose model, frequency governor, and
+# turbo/HT settings are documented in bench/baseline/.
+#
+# On GitHub-hosted runners the numbers are too noisy to be useful — this
+# workflow will skip itself there rather than produce misleading results.
+
+jobs:
+  run-bench:
+    runs-on: [self-hosted, swiftfix-bench-host]
+    if: ${{ !github.event.act }}  # allow local `act` testing without the runner
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build Release
+        run: scripts/build.sh --clean
+
+      - name: Run benchmarks
+        run: scripts/bench.sh --benchmark_min_time=3s
+
+      - name: Archive results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-${{ github.sha }}
+          path: bench/results/*.json
+          retention-days: 90

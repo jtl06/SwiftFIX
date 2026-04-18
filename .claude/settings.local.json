@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh release *)",
+      "Bash(git ls-remote *)",
+      "Bash(git submodule *)",
+      "Bash(python3 corpus/generate.py)",
+      "Bash(python3 -c \"p=open\\('corpus/valid/01_logon','rb'\\).read\\(\\); print\\(p.decode\\('ascii'\\).replace\\('\\\\x01','|'\\)\\)\")",
+      "Bash(chmod +x /home/jtl/Documents/SwiftFIX/scripts/*.sh /home/jtl/Documents/SwiftFIX/corpus/generate.py)",
+      "Bash(cmake --version)",
+      "Bash(g++ --version)",
+      "Bash(clang++ --version)",
+      "Bash(apt list *)",
+      "Read(//snap/bin/**)",
+      "Read(//usr/local/bin/**)",
+      "Bash(dpkg -s cmake)",
+      "Bash(pip3 show *)",
+      "Bash(pipx list *)",
+      "Bash(python3 -c \"import cmake; print\\(cmake.__file__\\)\")",
+      "Bash(scripts/build.sh)",
+      "Bash(scripts/build.sh --clean --clang)",
+      "Bash(scripts/bench.sh --benchmark_min_time=0.2s)",
+      "Bash(cmake --build build/release --target swiftfix_bench)"
+    ]
+  }
+}

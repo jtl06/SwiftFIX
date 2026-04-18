@@ -1,0 +1,52 @@
+# Build outputs
+build/
+build-*/
+out/
+cmake-build-*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+Testing/
+_deps/
+
+# Compiled
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Profiling artifacts
+perf.data
+perf.data.old
+*.svg
+profile/flamegraphs/*.svg
+profile/flamegraphs/*.folded
+profile/flamegraphs/*.stacks
+
+# Bench results are committed (see bench/results/), but intermediate files are not
+bench/results/*.tmp
+bench/results/*.raw
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+compile_commands.json
+.cache/
+
+# Logs, crashes
+core
+core.*
+*.log
