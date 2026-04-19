@@ -18,8 +18,6 @@ Phase 1 numbers on `corpus/bulk.stream` (1190 messages, Release build, i7-12650H
 |------------------------|----------|-------------|---------|
 | `QuickFIX_StreamSplit` | 1.04 ms  | 146 MiB/s   | 959 k   |
 | `SwiftFIX_ScalarSplit` | 94.8 µs  | 1.57 GiB/s  | 10.56 M |
-|                        |          |             |         |
-| `QuickFIX_StreamParse` | 1.91 ms  | 80 MiB/s    | 525 k   |
 
 `ScalarSplit` is the Swiftfix equivalent to `StreamSplit`, both producing frame boundarie for `StreamParse`. 
 
@@ -79,14 +77,6 @@ scripts/bench.sh             # writes JSON to bench/results/
 ```
 
 Baselines per machine are committed under `bench/baseline/`. See its README for naming conventions.
-
-## Profile
-
-```bash
-scripts/profile.sh           # perf record → flame graph SVG
-```
-
-The script checks for `perf` and the FlameGraph scripts and prints install instructions if either is missing. Output lands in `profile/flamegraphs/flamegraph-<timestamp>.svg`.
 
 ## Regenerating the corpus
 
