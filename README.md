@@ -14,10 +14,10 @@ QuickFIX remains the authoritative engine for validation, session state, and mes
 
 Phase 1 numbers on `corpus/bulk.stream` (1190 messages, Release build, i7-12650H, CPU scaling enabled — treat as rough):
 
-| Benchmark              | p50 time | Throughput  | Msg/s   |
-|------------------------|----------|-------------|---------|
-| `QuickFIX_StreamSplit` | 1.04 ms  | 146 MiB/s   | 959 k   |
-| `SwiftFIX_ScalarSplit` | 94.8 µs  | 1.57 GiB/s  | 10.56 M |
+| Benchmark              | p50 time | Per msg  | Throughput  | Msg/s   |
+|------------------------|----------|----------|-------------|---------|
+| `QuickFIX_StreamSplit` | 1.04 ms  | 874 ns   | 146 MiB/s   | 959 k   |
+| `SwiftFIX_ScalarSplit` | 94.8 µs  | 79.7 ns  | 1.57 GiB/s  | 10.56 M |
 
 `ScalarSplit` is the Swiftfix equivalent to `StreamSplit`, both producing frame boundarie for `StreamParse`. 
 

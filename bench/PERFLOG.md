@@ -11,6 +11,7 @@ Stock `FIX::Parser` on the same corpus. Here as the comparison baseline.
 | Metric            | `StreamSplit` | `StreamParse` |
 |-------------------|---------------|---------------|
 | p50 time          | 1.04 ms       | 1.91 ms       |
+| Per msg           | 874 ns        | 1,605 ns      |
 | Throughput        | 146 MiB/s     | 80 MiB/s      |
 | Msg/s             | 959 k         | 525 k         |
 | Instructions/msg  | 722           | —             |
@@ -26,6 +27,7 @@ Stock `FIX::Parser` on the same corpus. Here as the comparison baseline.
 | Metric            | Value       |
 |-------------------|-------------|
 | p50 time          | 123 µs      |
+| Per msg           | 103 ns      |
 | Throughput        | 1.21 GiB/s  |
 | Msg/s             | 8.12 M      |
 | Instructions/msg  | 1,788       |
@@ -43,6 +45,7 @@ Replaced cursor/index arithmetic in `scan_one_field` with a `const unsigned char
 | Metric            | Before  | After   | Δ          |
 |-------------------|---------|---------|------------|
 | p50 time          | 123 µs  | 121 µs  | -2%        |
+| Per msg           | 103 ns  | 102 ns  | -2%        |
 | Throughput        | 1.21 GiB/s | 1.227 GiB/s | +1.4% |
 | Msg/s             | 8.12 M  | 8.26 M  | +1.7%      |
 | Instructions/msg  | 1,788   | 1,761   | -1.5%      |
@@ -60,6 +63,7 @@ Single ≥12-byte buffer precheck, then literal `"8="` / `"9="` / `"35="` matche
 | Metric            | Before  | After   | Δ          |
 |-------------------|---------|---------|------------|
 | p50 time          | 121 µs  | 116 µs  | -4%        |
+| Per msg           | 102 ns  | 97 ns   | -4%        |
 | Throughput        | 1.227 GiB/s | 1.275 GiB/s | +3.9% |
 | Msg/s             | 8.26 M  | 8.59 M  | +4.0%      |
 | Instructions/msg  | 1,761   | 1,706   | -3.1%      |
@@ -77,6 +81,7 @@ Annotated error/truncation returns in `scan`, `scan_one_field`, `parse_uint` and
 | Metric            | Before  | After   | Δ          |
 |-------------------|---------|---------|------------|
 | p50 time          | 116 µs  | 99.4 µs | -14%       |
+| Per msg           | 97 ns   | 83.5 ns | -14%       |
 | Throughput        | 1.275 GiB/s | 1.497 GiB/s | +17% |
 | Msg/s             | 8.59 M  | 10.08 M | +17%       |
 | Instructions/msg  | 1,706   | 1,373   | -20%       |
@@ -94,6 +99,7 @@ Replaced `(span, size_t& cursor)` with `(const unsigned char*& p, end, base)`. D
 | Metric            | Before  | After   | Δ          |
 |-------------------|---------|---------|------------|
 | p50 time          | 99.4 µs | 94.8 µs | -5%        |
+| Per msg           | 83.5 ns | 79.7 ns | -5%        |
 | Throughput        | 1.497 GiB/s | 1.568 GiB/s | +4.7% |
 | Msg/s             | 10.08 M | 10.56 M | +4.8%      |
 | Instructions/msg  | 1,373   | 1,417   | +3%        |
