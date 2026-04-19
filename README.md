@@ -4,9 +4,9 @@ Faster (Work in progress: SIMD-assisted)  FIX pre-parser for [QuickFIX C++](http
 
 > Status: Scalar preparser implemented and benchmarked. Optimization and SIMD preparser to follow.
 
-SwiftFIX performs structural scanning of inbound FIX tag-value messages — finding `<SOH>` and `=` boundaries, extracting header tag positions, and doing early malformed-frame rejection. It hands QuickFIX a pre-computed field-boundary table.
+SwiftFIX performs structural scanning of inbound FIX tag-value messages by finding `<SOH>` and `=` boundaries, extracting header tag positions, and doing early malformed-frame rejection. It hands QuickFIX a pre-computed field-boundary table.
 
-The SwiftFIX project composes of a hand written scalar preparser (WIP: and a SIMD preparser for AVX2/AVX512/NEON machines).SwiftFIX represents an 8× improvement to throughput by replacing QuickFIX's allocation-and-copy frame extraction (a fresh std::string per message, a memmove of the read buffer on every call) with a single linear pass that writes fixed-size offset records into a reused output buffer. This eliminates ~900 L1 cache-line refills per message and letting the CPU pipeline run at ~3.8 IPC instead of stalling at 0.18.
+The SwiftFIX project composes of a hand written scalar preparser (WIP: and a SIMD preparser for AVX2/AVX512/NEON machines). SwiftFIX represents an 8× improvement to throughput by replacing QuickFIX's allocation-and-copy frame extraction (a fresh std::string per message, a memmove of the read buffer on every call) with a single linear pass that writes fixed-size offset records into a reused output buffer. This eliminates ~900 L1 cache-line refills per message and letting the CPU pipeline run at ~3.8 IPC instead of stalling at 0.18.
 
 QuickFIX remains the authoritative engine for validation, session state, and message semantics.
 
