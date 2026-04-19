@@ -67,3 +67,20 @@ Single ≥12-byte buffer precheck, then literal `"8="` / `"9="` / `"35="` matche
 | Branches/msg      | 453     | 428     | -5.5%      |
 | L1-D misses/msg   | 0.21    | 0.33    | +0.12      |
 | IPC               | 3.85    | 3.89    | +1%        |
+
+---
+
+## 2026-04-19 — `[[unlikely]]` on cold branches
+
+Annotated error/truncation returns in `scan`, `scan_one_field`, `parse_uint` and the switch cases for `FieldScan::Truncated/Malformed`. Compiler moves cold code out of the hot path.
+
+| Metric            | Before  | After   | Δ          |
+|-------------------|---------|---------|------------|
+| p50 time          | 116 µs  | 99.4 µs | -14%       |
+| Throughput        | 1.275 GiB/s | 1.497 GiB/s | +17% |
+| Msg/s             | 8.59 M  | 10.08 M | +17%       |
+| Instructions/msg  | 1,706   | 1,373   | -20%       |
+| Cycles/msg        | 439     | 374     | -15%       |
+| Branches/msg      | 428     | 380     | -11%       |
+| L1-D misses/msg   | 0.33    | 0.04    | ~0         |
+| IPC               | 3.89    | 3.67    | -6%        |

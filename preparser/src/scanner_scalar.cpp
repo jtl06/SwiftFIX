@@ -14,19 +14,19 @@ class ScalarScanner final : public Scanner {
         out.reset();
 
         // header check
-        if (buffer.size() < 12) return ScanStatus::Truncated;
+        if (buffer.size() < 12) [[unlikely]] return ScanStatus::Truncated;
 
         const unsigned char* const base = reinterpret_cast<const unsigned char*>(buffer.data());
         const unsigned char* const end  = base + buffer.size();
         const unsigned char*       p    = base;
 
         // tag 8
-        if (p[0] != '8' || p[1] != '=') return ScanStatus::BadHeader;
+        if (p[0] != '8' || p[1] != '=') [[unlikely]] return ScanStatus::BadHeader;
         const unsigned char* const t8_start = p;
         p += 2;
         const unsigned char* const v8_start = p;
         while (p < end && *p != 0x01) ++p;
-        if (p == end) return ScanStatus::Truncated;
+        if (p == end) [[unlikely]] return ScanStatus::Truncated;
         out.begin_string_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = FieldEntry{
             static_cast<std::uint32_t>(t8_start - base),
@@ -37,25 +37,25 @@ class ScalarScanner final : public Scanner {
         ++p;  // past SOH
 
         // tag 9
-        if (p[0] != '9' || p[1] != '=') return ScanStatus::BadHeader;
+        if (p[0] != '9' || p[1] != '=') [[unlikely]] return ScanStatus::BadHeader;
         const unsigned char* const t9_start = p;
         p += 2;
         const unsigned char* const v9_start = p;
         std::uint32_t body_len = 0;
         while (p < end && *p != 0x01) {
-            if (!is_digit(*p))                    return ScanStatus::Malformed;
-            if (body_len > (UINT32_MAX - 9) / 10) return ScanStatus::Malformed;
+            if (!is_digit(*p))                    [[unlikely]] return ScanStatus::Malformed;
+            if (body_len > (UINT32_MAX - 9) / 10) [[unlikely]] return ScanStatus::Malformed;
             body_len = body_len * 10 + (*p - '0');
             ++p;
         }
-        if (p == end)      return ScanStatus::Truncated;
-        if (p == v9_start) return ScanStatus::Malformed;  // empty body length
+        if (p == end)      [[unlikely]] return ScanStatus::Truncated;
+        if (p == v9_start) [[unlikely]] return ScanStatus::Malformed;  // empty body length
         out.body_length_idx = static_cast<std::int32_t>(out.field_count);
         out.declared_body_length = body_len;
         out.fields[out.field_count++] = FieldEntry{
             static_cast<std::uint32_t>(t9_start - base),
             static_cast<std::uint32_t>(v9_start - base),
-            static_cast<std::uint32_t>(p        - base),
+            static_cast<std::uint32_t>(p - base),
             9,
         };
         ++p;  // past SOH
@@ -63,15 +63,15 @@ class ScalarScanner final : public Scanner {
         // body bounds check
         const std::size_t body_start = static_cast<std::size_t>(p - base);
         const std::size_t body_end   = body_start + body_len;
-        if (body_end + 7 > buffer.size()) return ScanStatus::Truncated;
+        if (body_end + 7 > buffer.size()) [[unlikely]] return ScanStatus::Truncated;
 
         // tag 35
-        if (p[0] != '3' || p[1] != '5' || p[2] != '=') return ScanStatus::BadHeader;
+        if (p[0] != '3' || p[1] != '5' || p[2] != '=') [[unlikely]] return ScanStatus::BadHeader;
         const unsigned char* const t35_start = p;
         p += 3;
         const unsigned char* const v35_start = p;
         while (p < end && *p != 0x01) ++p;
-        if (p == end) return ScanStatus::Truncated;
+        if (p == end) [[unlikely]] return ScanStatus::Truncated;
         out.msg_type_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = FieldEntry{
             static_cast<std::uint32_t>(t35_start - base),
@@ -86,31 +86,31 @@ class ScalarScanner final : public Scanner {
 
         // main body loop
         while (i < body_end) {
-            if (out.field_count >= kMaxFields) return ScanStatus::TableFull;
+            if (out.field_count >= kMaxFields) [[unlikely]] return ScanStatus::TableFull;
             switch (scan_one_field(buffer, i, entry)) {
                 case FieldScan::Ok:        break;
-                case FieldScan::Truncated: return ScanStatus::Truncated;
-                case FieldScan::Malformed: return ScanStatus::Malformed;
+                [[unlikely]] case FieldScan::Truncated: return ScanStatus::Truncated;
+                [[unlikely]] case FieldScan::Malformed: return ScanStatus::Malformed;
             }
-            if (entry.tag_number == 95 || entry.tag_number == 96)
+            if (entry.tag_number == 95 || entry.tag_number == 96) [[unlikely]]
                 return ScanStatus::FallbackRequested;
             out.fields[out.field_count++] = entry;
         }
         // check overshoot
-        if (i != body_end) return ScanStatus::BadBodyLength;
+        if (i != body_end) [[unlikely]] return ScanStatus::BadBodyLength;
 
         // check ending and checksum
         switch (scan_one_field(buffer, i, entry)) {
             case FieldScan::Ok:        break;
-            case FieldScan::Truncated: return ScanStatus::Truncated;
-            case FieldScan::Malformed: return ScanStatus::Malformed;
+            [[unlikely]] case FieldScan::Truncated: return ScanStatus::Truncated;
+            [[unlikely]] case FieldScan::Malformed: return ScanStatus::Malformed;
         }
         //check if 10
-        if (entry.tag_number != 10) return ScanStatus::BadBodyLength;
-        if (entry.value_end - entry.value_start != 3) return ScanStatus::Malformed;
+        if (entry.tag_number != 10) [[unlikely]] return ScanStatus::BadBodyLength;
+        if (entry.value_end - entry.value_start != 3) [[unlikely]] return ScanStatus::Malformed;
         // check 3 bytes are digits. checksum handled by quickfix
         [[maybe_unused]] std::uint32_t cksum_value = 0;
-        if (!parse_uint(buffer, entry.value_start, entry.value_end, cksum_value))
+        if (!parse_uint(buffer, entry.value_start, entry.value_end, cksum_value)) [[unlikely]]
             return ScanStatus::Malformed;
 
         //set fast access slot
@@ -143,19 +143,19 @@ class ScalarScanner final : public Scanner {
                 p++;
             } else if (c == '=') {
                 break;
-            } else {
+            } else [[unlikely]] {
                 return FieldScan::Malformed;
             }
         }
-        if (p == end)       return FieldScan::Truncated;
-        if (p == tag_start) return FieldScan::Malformed;  // empty tag: "=value"
-        if (tag == 0)       return FieldScan::Malformed;  // FIX reserves tag 0
+        if (p == end)       [[unlikely]] return FieldScan::Truncated;
+        if (p == tag_start) [[unlikely]] return FieldScan::Malformed;  // empty tag: "=value"
+        if (tag == 0)       [[unlikely]] return FieldScan::Malformed;  // FIX reserves tag 0
 
         p++;                                              // past '='
         const unsigned char* const value_start = p;
 
         while (p < end && *p != 0x01) p++;
-        if (p == end) return FieldScan::Truncated;
+        if (p == end) [[unlikely]] return FieldScan::Truncated;
 
         const unsigned char* const soh_pos = p;
         p++;                                              // past <SOH>
@@ -175,14 +175,14 @@ class ScalarScanner final : public Scanner {
     static bool parse_uint(std::span<const std::byte> buffer,
                            std::size_t from, std::size_t to,
                            std::uint32_t& out) noexcept {
-        if (from == to) return false;
+        if (from == to) [[unlikely]] return false;
         std::uint32_t v = 0;
         const unsigned char* p = reinterpret_cast<const unsigned char*>(buffer.data()) + from;
         const unsigned char* end = reinterpret_cast<const unsigned char*>(buffer.data()) + to;
         while (p < end) {
             const unsigned c = *p++;
-            if (!is_digit(c)) return false;
-            if (v > (UINT32_MAX - 9) / 10) return false;   // overflow guard
+            if (!is_digit(c)) [[unlikely]] return false;
+            if (v > (UINT32_MAX - 9) / 10) [[unlikely]] return false;   // overflow guard
             v = v * 10 + (c - '0');
         }
         out = v;
