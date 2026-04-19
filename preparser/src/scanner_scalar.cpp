@@ -1,11 +1,6 @@
 // scanner_scalar.cpp — reference scalar implementation.
 //
-// Phase 0: the scanner API is declared but not implemented. Stubs return
-// ScanStatus::FallbackRequested so any accidental production use cleanly
-// defers to stock QuickFIX rather than emitting garbage.
-//
-// Implementation will arrive after profiling (docs/design.md:Phase 0 Findings)
-// confirms the scan path is actually hot in the target workload.
+// Scalar implementation completed.
 #include "swiftfix/scanner.hpp"
 
 namespace swiftfix {
@@ -15,12 +10,9 @@ namespace {
 class ScalarScanner final : public Scanner {
   public:
 
-    ScanStatus scan(std::span<const std::byte> buffer,
-                    FieldIndex& out) noexcept override {
+    ScanStatus scan(std::span<const std::byte> buffer, FieldIndex& out) noexcept override {
+        //reset buffer
         out.reset();
-        // TODO(phase1): restructure into five stages — header (8, 9, 35),
-        // body loop bounded by declared_body_length, checksum (10). For now
-        // this is a generic emission loop that exercises scan_one_field.
 
         //check if empty 
         if (buffer.empty()) return ScanStatus::Truncated;
