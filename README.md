@@ -6,7 +6,7 @@ Faster (Work in progress: SIMD-assisted)  FIX pre-parser for [QuickFIX C++](http
 
 SwiftFIX performs structural scanning of inbound FIX tag-value messages — finding `<SOH>` and `=` boundaries, extracting header tag positions, and doing early malformed-frame rejection. It hands QuickFIX a pre-computed field-boundary table.
 
-The SwiftFIX project composes of a hand written scalar preparser (WIP: and a SIMD preparser for AVX2/AVX512/NEON machines).SwiftFIX represents an 8× improvement to throughput by replacing QuickFIX's allocation-and-copy frame extraction (a fresh std::string per message, a memmove of the read buffer on every call) with a single linear pass that writes fixed-size offset records into a reused output buffer — eliminating ~900 L1 cache-line refills per message and letting the CPU pipeline run at ~3.8 IPC instead of stalling at 0.18.
+The SwiftFIX project composes of a hand written scalar preparser (WIP: and a SIMD preparser for AVX2/AVX512/NEON machines).SwiftFIX represents an 8× improvement to throughput by replacing QuickFIX's allocation-and-copy frame extraction (a fresh std::string per message, a memmove of the read buffer on every call) with a single linear pass that writes fixed-size offset records into a reused output buffer. This eliminates ~900 L1 cache-line refills per message and letting the CPU pipeline run at ~3.8 IPC instead of stalling at 0.18.
 
 QuickFIX remains the authoritative engine for validation, session state, and message semantics.
 
@@ -63,7 +63,7 @@ Phase 1 numbers on `corpus/bulk.stream` (1190 messages, Release build, i7-12650H
 |                        |          |             |        |
 | `QuickFIX_StreamParse` | 1.91 ms  | 80 MiB/s    | 525 k  |
 
-`ScalarSplit` is the Swiftfix equivalent to `StreamSplit` — both produce frame boundaries. SwiftFIX result in a ~8x speedup over the QuickFIX implementation.
+`ScalarSplit` is the Swiftfix equivalent to `StreamSplit`, both producing frame boundarie for `StreamParse`. 
 
 ### Perf counters (libpfm4)
 
@@ -77,7 +77,7 @@ Per-message (per-iteration counts ÷ 1190). Re-run with `--benchmark_perf_counte
 | IPC               | 0.18          | 3.78          | **21× higher**  |
 | L1-D misses/msg   | 911           | 0.76          | **~1200× fewer**|
 
-The scanner does more raw work but finishes in one-eighth the cycles — it's compute-bound on hot L1 data. QuickFIX is memory-bound: ~900 L1 refills per message (per-frame `std::string` allocations, `FIX::Parser` buffer state, virtual dispatch) × ~12-cycle L2 latency ≈ the entire cycle gap. LLC is cold for both — `bulk.stream` (~150 KiB) fits in L2.
+The SwiftFIX splitter is more computationally intensive, but finishes finishes in one-eighth the cycles, as it is compute-bound on hot L1 data. QuickFIX is memory-bound: ~900 L1 refills per message (per-frame `std::string` allocations, `FIX::Parser` buffer state, virtual dispatch) × ~12-cycle L2 latency ≈ the entire cycle gap. LLC is cold for both — `bulk.stream` (~150 KiB) fits in L2.
 
 ## Profile
 
