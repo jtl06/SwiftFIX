@@ -90,8 +90,8 @@ class ScalarScanner final : public Scanner {
             case FieldScan::Truncated: return ScanStatus::Truncated;
             case FieldScan::Malformed: return ScanStatus::Malformed;
         }
-        //check 10
-        if (entry.tag_number != 10) return ScanStatus::Malformed;
+        //check if 10
+        if (entry.tag_number != 10) return ScanStatus::BadBodyLength;
         if (entry.value_end - entry.value_start != 3) return ScanStatus::Malformed;
         // check 3 bytes are digits. checksum handled by quickfix
         [[maybe_unused]] std::uint32_t cksum_value = 0;
@@ -115,51 +115,45 @@ class ScalarScanner final : public Scanner {
     // terminating <SOH>. On Truncated, the buffer ended mid-field with a
     // prefix that could still complete. On Malformed, the bytes seen cannot
     // form a valid field regardless of continuation.
-    static FieldScan scan_one_field(std::span<const std::byte> buffer,
-                                    std::size_t& cursor,
+    static FieldScan scan_one_field(std::span<const std::byte> buffer, std::size_t& cursor,
                                     FieldEntry& entry) noexcept {
-        const std::size_t tag_start = cursor;
-        std::uint32_t tag = 0;
+        const unsigned char* const base      = reinterpret_cast<const unsigned char*>(buffer.data());
+        const unsigned char* const end       = base + buffer.size();
+        const unsigned char* const tag_start = base + cursor;
+        const unsigned char*       p         = tag_start;
 
-        while (cursor < buffer.size()) {
-            const unsigned c = std::to_integer<unsigned char>(buffer[cursor]);
+        std::uint32_t tag = 0;
+        while (p < end) {
+            const unsigned c = *p;
             if (is_digit(c)) {
-                // Guard against accumulator wrap on a pathological 10+ digit tag.
-                // (UINT32_MAX - 9) / 10 is the largest `tag` value that can still
-                // accept any next digit without overflowing uint32.
-                // if (tag > (UINT32_MAX - 9) / 10) return FieldScan::Malformed;
                 tag = tag * 10 + (c - '0');
-                ++cursor;
+                p++;
             } else if (c == '=') {
                 break;
             } else {
                 return FieldScan::Malformed;
             }
         }
-        if (cursor == buffer.size()) return FieldScan::Truncated;
+        if (p == end)       return FieldScan::Truncated;
+        if (p == tag_start) return FieldScan::Malformed;  // empty tag: "=value"
+        if (tag == 0)       return FieldScan::Malformed;  // FIX reserves tag 0
 
-        const std::size_t eq_pos = cursor;
-        if (tag_start == eq_pos) return FieldScan::Malformed;  // empty tag: "=value"
-        if (tag == 0)            return FieldScan::Malformed;  // FIX reserves tag 0
-        ++cursor;                                              // past '='
-        const std::size_t value_start = cursor;
+        p++;                                              // past '='
+        const unsigned char* const value_start = p;
 
-        while (cursor < buffer.size()) {
-            const unsigned c = std::to_integer<unsigned char>(buffer[cursor]);
-            if (c == 0x01) break;
-            ++cursor;
-        }
-        if (cursor == buffer.size()) return FieldScan::Truncated;
+        while (p < end && *p != 0x01) p++;
+        if (p == end) return FieldScan::Truncated;
 
-        const std::size_t soh_pos = cursor;
-        ++cursor;  // past <SOH>
+        const unsigned char* const soh_pos = p;
+        p++;                                              // past <SOH>
 
         entry = FieldEntry{
-            static_cast<std::uint32_t>(tag_start),
-            static_cast<std::uint32_t>(value_start),
-            static_cast<std::uint32_t>(soh_pos),
+            static_cast<std::uint32_t>(tag_start - base),
+            static_cast<std::uint32_t>(value_start - base),
+            static_cast<std::uint32_t>(soh_pos - base),
             tag,
         };
+        cursor = static_cast<std::size_t>(p - base);
         return FieldScan::Ok;
     }
 
@@ -172,14 +166,16 @@ class ScalarScanner final : public Scanner {
                            std::uint32_t& out) noexcept {
         if (from == to) return false;
         std::uint32_t v = 0;
-        for (std::size_t k = from; k < to; ++k) {
-            const unsigned c = std::to_integer<unsigned char>(buffer[k]);
+        const unsigned char* p = reinterpret_cast<const unsigned char*>(buffer.data()) + from;
+        const unsigned char* end = reinterpret_cast<const unsigned char*>(buffer.data()) + to;
+        while (p < end) {
+            const unsigned c = *p++;
             if (!is_digit(c)) return false;
             if (v > (UINT32_MAX - 9) / 10) return false;   // overflow guard
             v = v * 10 + (c - '0');
         }
         out = v;
-        return true;
+        return true;    
     }
 
     //returns digit if between 0 and 9
