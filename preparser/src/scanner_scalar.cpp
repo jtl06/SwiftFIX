@@ -81,13 +81,13 @@ class ScalarScanner final : public Scanner {
         };
         ++p;  // past SOH
 
-        std::size_t i = static_cast<std::size_t>(p - base);
+        const unsigned char* const body_end_ptr = base + body_end;
         FieldEntry entry;
 
         // main body loop
-        while (i < body_end) {
+        while (p < body_end_ptr) {
             if (out.field_count >= kMaxFields) [[unlikely]] return ScanStatus::TableFull;
-            switch (scan_one_field(buffer, i, entry)) {
+            switch (scan_one_field(p, end, base, entry)) {
                 case FieldScan::Ok:        break;
                 [[unlikely]] case FieldScan::Truncated: return ScanStatus::Truncated;
                 [[unlikely]] case FieldScan::Malformed: return ScanStatus::Malformed;
@@ -97,10 +97,10 @@ class ScalarScanner final : public Scanner {
             out.fields[out.field_count++] = entry;
         }
         // check overshoot
-        if (i != body_end) [[unlikely]] return ScanStatus::BadBodyLength;
+        if (p != body_end_ptr) [[unlikely]] return ScanStatus::BadBodyLength;
 
         // check ending and checksum
-        switch (scan_one_field(buffer, i, entry)) {
+        switch (scan_one_field(p, end, base, entry)) {
             case FieldScan::Ok:        break;
             [[unlikely]] case FieldScan::Truncated: return ScanStatus::Truncated;
             [[unlikely]] case FieldScan::Malformed: return ScanStatus::Malformed;
@@ -116,7 +116,7 @@ class ScalarScanner final : public Scanner {
         //set fast access slot
         out.checksum_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = entry;
-        out.frame_length = static_cast<std::uint32_t>(i);
+        out.frame_length = static_cast<std::uint32_t>(p - base);
         return ScanStatus::Ok;
     }
 
@@ -125,15 +125,15 @@ class ScalarScanner final : public Scanner {
   private:
     enum class FieldScan { Ok, Truncated, Malformed };
 
-    // Scans one "tag=value<SOH>" triple starting at buffer[cursor]. On Ok,
-    // fills `entry` and advances `cursor` to the byte just past the
-    // terminating <SOH>. 
-    static FieldScan scan_one_field(std::span<const std::byte> buffer, std::size_t& cursor,
+    // Scans one "tag=value<SOH>" triple starting at *p. On Ok, fills
+    // `entry` (with offsets relative to `base`) and advances `p` to the
+    // byte just past the terminating <SOH>. `end` and `base` are the
+    // caller's precomputed buffer bounds/origin.
+    static FieldScan scan_one_field(const unsigned char*& p,
+                                    const unsigned char* end,
+                                    const unsigned char* base,
                                     FieldEntry& entry) noexcept {
-        const unsigned char* const base      = reinterpret_cast<const unsigned char*>(buffer.data());
-        const unsigned char* const end       = base + buffer.size();
-        const unsigned char* const tag_start = base + cursor;
-        const unsigned char*       p         = tag_start;
+        const unsigned char* const tag_start = p;
 
         std::uint32_t tag = 0;
         while (p < end) {
@@ -151,14 +151,14 @@ class ScalarScanner final : public Scanner {
         if (p == tag_start) [[unlikely]] return FieldScan::Malformed;  // empty tag: "=value"
         if (tag == 0)       [[unlikely]] return FieldScan::Malformed;  // FIX reserves tag 0
 
-        p++;                                              // past '='
+        p++;  // past '='
         const unsigned char* const value_start = p;
 
         while (p < end && *p != 0x01) p++;
         if (p == end) [[unlikely]] return FieldScan::Truncated;
 
         const unsigned char* const soh_pos = p;
-        p++;                                              // past <SOH>
+        p++; // past <SOH>
 
         entry = FieldEntry{
             static_cast<std::uint32_t>(tag_start - base),
@@ -166,7 +166,6 @@ class ScalarScanner final : public Scanner {
             static_cast<std::uint32_t>(soh_pos - base),
             tag,
         };
-        cursor = static_cast<std::size_t>(p - base);
         return FieldScan::Ok;
     }
 

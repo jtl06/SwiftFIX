@@ -84,3 +84,20 @@ Annotated error/truncation returns in `scan`, `scan_one_field`, `parse_uint` and
 | Branches/msg      | 428     | 380     | -11%       |
 | L1-D misses/msg   | 0.33    | 0.04    | ~0         |
 | IPC               | 3.89    | 3.67    | -6%        |
+
+---
+
+## 2026-04-19 — pointer-based `scan_one_field` API
+
+Replaced `(span, size_t& cursor)` with `(const unsigned char*& p, end, base)`. Drops per-call `reinterpret_cast` + `base + cursor` + `cursor = p - base`. `scan()` body loop fully pointer-native via `body_end_ptr`.
+
+| Metric            | Before  | After   | Δ          |
+|-------------------|---------|---------|------------|
+| p50 time          | 99.4 µs | 94.8 µs | -5%        |
+| Throughput        | 1.497 GiB/s | 1.568 GiB/s | +4.7% |
+| Msg/s             | 10.08 M | 10.56 M | +4.8%      |
+| Instructions/msg  | 1,373   | 1,417   | +3%        |
+| Cycles/msg        | 374     | 357     | -5%        |
+| Branches/msg      | 380     | 381     | flat       |
+| L1-D misses/msg   | 0.04    | 0.05    | ~0         |
+| IPC               | 3.67    | 3.97    | +8%        |
