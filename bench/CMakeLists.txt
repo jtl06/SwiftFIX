@@ -45,6 +45,7 @@ target_include_directories(swiftfix_bench PRIVATE src)
 target_link_libraries(swiftfix_bench
     PRIVATE
         SwiftFIX::QuickFIX
+        SwiftFIX::swiftfix
         SwiftFIX::CompilerFlags
         benchmark::benchmark)
 

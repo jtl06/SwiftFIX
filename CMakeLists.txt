@@ -56,10 +56,16 @@ endif()
 set(QUICKFIX_SONAME "libquickfix.so.16")
 set(QUICKFIX_LIB_PATH "${QUICKFIX_INSTALL_DIR}/lib/${QUICKFIX_SONAME}")
 
+set(QUICKFIX_PATCH_SCRIPT "${CMAKE_SOURCE_DIR}/integration/patches/apply.sh")
+
 ExternalProject_Add(quickfix_external
     SOURCE_DIR       "${QUICKFIX_SRC_DIR}"
     BINARY_DIR       "${QUICKFIX_BUILD_DIR}"
     INSTALL_DIR      "${QUICKFIX_INSTALL_DIR}"
+    # Idempotent patcher — safe to re-run on already-patched trees. Also
+    # reruns whenever the script's timestamp changes, so editing a patch
+    # and re-configuring picks up the new version.
+    PATCH_COMMAND "${QUICKFIX_PATCH_SCRIPT}"
     CMAKE_ARGS
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_INSTALL_PREFIX=${QUICKFIX_INSTALL_DIR}
@@ -72,6 +78,11 @@ ExternalProject_Add(quickfix_external
         -DCMAKE_CXX_STANDARD=14
         -DCMAKE_CXX_STANDARD_REQUIRED=ON
         -DCMAKE_CXX_EXTENSIONS=OFF
+        # Turn on the SwiftFIX fast-path hooks added by the patch series
+        # (integration/patches/*.patch). Without this macro the patches
+        # contribute zero symbols, which is the intended stock behavior
+        # but not what swiftfix wants.
+        -DCMAKE_CXX_FLAGS=-DSWIFTFIX_ENABLE_PREPARSE
         # Match parent-project toolchain so mixing compilers doesn't
         # cause link-time surprises.
         -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
@@ -88,6 +99,11 @@ ExternalProject_Add(quickfix_external
     LOG_INSTALL 1)
 
 file(MAKE_DIRECTORY "${QUICKFIX_INSTALL_DIR}/include")
+
+# Keep the SwiftFIX side in sync with the QuickFIX sub-build: consumers of
+# the patched QuickFIX headers (the shim, tests, bench) must see the same
+# macro that gated PreScanField and setFromPreScan into the public header.
+add_compile_definitions(SWIFTFIX_ENABLE_PREPARSE)
 
 # Proper imported target. IMPORTED_LOCATION is the file to link against;
 # INTERFACE_INCLUDE_DIRECTORIES provides header visibility to consumers.

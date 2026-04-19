@@ -33,6 +33,6 @@ TEST(FieldIndex, ResetClearsAllScalars) {
 
 TEST(FieldIndex, EntrySizeIsStable) {
     // The scanner hot path assumes this layout; regressions must trip CI.
-    static_assert(sizeof(swiftfix::FieldEntry) == 20);
+    static_assert(sizeof(swiftfix::FieldEntry) == 16);
     SUCCEED();
 }

@@ -11,20 +11,23 @@
 
 namespace swiftfix {
 
-// Byte offsets within the original raw FIX buffer. Using 32-bit offsets lets
-// us pack a field entry into 16 bytes and caps single-message size at 4 GiB
-// — well beyond anything a real session will produce.
+// Byte offsets within the original raw FIX buffer. Using 32-bit offsets packs
+// a field entry into 16 bytes and caps single-message size at 4 GiB — well
+// beyond anything a real session will produce. The '=' byte is not stored
+// because the consumer only needs [value_start, value_end) to copy the value
+// and tag_number to dispatch; see docs/field_index_format.md.
 struct FieldEntry {
     std::uint32_t tag_start;     // offset of the first tag-digit byte
-    std::uint32_t equals_pos;    // offset of the '=' byte
-    std::uint32_t value_start;   // offset of the first value byte (equals_pos + 1)
+    std::uint32_t value_start;   // offset of the first value byte (byte after '=')
     std::uint32_t value_end;     // offset of the <SOH> terminating the value
     std::uint32_t tag_number;    // parsed tag number (e.g. 35 for MsgType)
 };
 
 // Compile-time cap on header/body fields we index inline. Messages exceeding
 // this emit ScanStatus::TableFull and the caller falls back to stock parsing.
-// Picked so FieldIndex fits in one 4 KiB thread-local arena with room to spare.
+// At 16 B per entry, 256 entries plus the 28 B FieldIndex header occupy
+// 4124 B — one page plus a cache line. Tuned against typical FIX.4.4 traffic
+// where per-message field counts are well under 50.
 inline constexpr std::size_t kMaxFields = 256;
 
 struct FieldIndex {
@@ -53,6 +56,6 @@ struct FieldIndex {
     }
 };
 
-static_assert(sizeof(FieldEntry) == 20, "FieldEntry layout must remain stable");
+static_assert(sizeof(FieldEntry) == 16, "FieldEntry layout must remain stable");
 
 }  // namespace swiftfix

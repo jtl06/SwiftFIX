@@ -1,0 +1,252 @@
+From 0000000000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
+From: jtl06 <firewrath9@gmail.com>
+Date: Sun, 19 Apr 2026 00:00:00 +0000
+Subject: [PATCH 0001] Expose parse-from-field-index hook on FIX::Message
+
+Adds an additive fast-path entry point:
+
+    FIX::PreScanField { int tag; const char* tag_start, *value_start, *value_end; }
+    FIX::Message::setFromPreScan(const PreScanField*, size_t n, ...)
+
+setFromPreScan mirrors setString's semantics (same isHeaderField /
+isTrailerField partitioning, same appendField + sortFields tail, same
+optional DataDictionary parameter carried through unused in phase 1)
+but consumes already-extracted field boundaries instead of rescanning
+the wire bytes. It eliminates the per-field std::find / IntConvertor
+overhead in Message::extractField on the receive path.
+
+The patch is strictly additive. Behind #ifdef SWIFTFIX_ENABLE_PREPARSE
+the build gains new symbols on Field.h (a const-char* overload of the
+metrics-eager FieldBase constructor + its calculateMetrics helper),
+Message.h (the PreScanField POD and the setFromPreScan declaration),
+and Message.cpp (the implementation). With the macro undefined the
+patch contributes zero bytes to the compiled library; the unmodified
+QuickFIX test suite passes bit-for-bit.
+
+Scope (phase 1):
+  - No repeating-group expansion. Callers route group-bearing messages
+    to the legacy setString path. swiftfix's scanner signals this via
+    ScanStatus::FallbackRequested.
+  - Validation is opt-in via the doValidation parameter and defaults
+    to false (matches how the swiftfix shim consumes it; the fallback
+    path remains authoritative for validation).
+  - EMX sub-message-type parsing is not replicated. If HAVE_EMX builds
+    need the fast path this gets revisited in a follow-up patch.
+
+Rationale: Profiling against bench/baseline (corpus/bulk.stream, bench
+results captured in commit 42ce312) showed Message::extractField and
+its std::find/IntConvertor calls accounting for the scan-side cost on
+QuickFIX_StreamParse. This patch lets swiftfix's pre-parser (which
+already walked every byte once) inform setString of the answers it
+already has, cutting the duplicate scan. The dominant remaining cost
+(std::string allocation inside FieldBase::m_string) is out of scope
+for this patch and is the target of the follow-up FieldBase rework.
+
+Build-system wiring (follow-up, not part of this patch):
+
+  1. The top-level CMakeLists.txt ExternalProject_Add(quickfix_external)
+     needs a PATCH_COMMAND that applies every file under
+     integration/patches/*.patch to ${QUICKFIX_SRC_DIR}, or the patches
+     never take effect. Today the block has UPDATE_DISCONNECTED 1 and no
+     patch step.
+  2. That same block needs to pass -DSWIFTFIX_ENABLE_PREPARSE into the
+     QuickFIX sub-build's compile flags (e.g. via CMAKE_CXX_FLAGS_INIT or
+     a QuickFIX-visible CMake option). Without it, the #ifdef gates
+     compile out and this patch contributes zero symbols — which is the
+     correct stock behavior, but also not what we want in the swiftfix
+     build.
+
+Both are small, orthogonal CMake edits tracked separately. Patch 0001
+itself is pure source changes to the QuickFIX tree.
+---
+ src/C++/Field.h     | 30 +++++++++++++++++++++++
+ src/C++/Message.cpp | 66 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/C++/Message.h   | 41 ++++++++++++++++++++++++++++++
+ 3 files changed, 137 insertions(+)
+
+diff --git a/src/C++/Field.h b/src/C++/Field.h
+index 6df7129c..0b4724ef 100644
+--- a/src/C++/Field.h
++++ b/src/C++/Field.h
+@@ -87,6 +87,22 @@ class FieldBase
+     , m_metrics( calculateMetrics( tagStart, tagEnd ) )
+   {}
+ 
++#ifdef SWIFTFIX_ENABLE_PREPARSE
++  /// SwiftFIX: construct from raw char* boundaries into a pre-scanned
++  /// buffer. Mirrors the iterator-taking constructor above but is
++  /// reachable from Message::setFromPreScan without copying the wire
++  /// bytes into a std::string first.
++  FieldBase( int tag,
++             const char* valueStart,
++             const char* valueEnd,
++             const char* tagStart,
++             const char* tagEnd )
++    : m_tag( tag )
++    , m_string( valueStart, valueEnd )
++    , m_metrics( calculateMetrics( tagStart, tagEnd ) )
++  {}
++#endif
++
+ public:
+   FieldBase( int tag, const std::string& string )
+     : m_tag( tag ), m_string(string), m_metrics( no_metrics() )
+@@ -227,6 +243,20 @@ private:
+ #endif
+   }
+ 
++#ifdef SWIFTFIX_ENABLE_PREPARSE
++  /// SwiftFIX: calculateMetrics overload for raw char* ranges. Identical
++  /// logic to the iterator variant above; separate overload because
++  /// std::string::const_iterator is a distinct wrapper type under both
++  /// libstdc++ and libc++.
++  static field_metrics calculateMetrics( const char* start, const char* end )
++  {
++    int checksum = 0;
++    for ( const char* str = start; str != end; ++str )
++      checksum += (unsigned char)( *str );
++    return field_metrics( end - start, checksum );
++  }
++#endif
++
+   static field_metrics calculateMetrics( const std::string& field )
+   {
+     return calculateMetrics( field.begin(), field.end() );
+diff --git a/src/C++/Message.cpp b/src/C++/Message.cpp
+index c8303111..bcf96058 100644
+--- a/src/C++/Message.cpp
++++ b/src/C++/Message.cpp
+@@ -428,6 +428,72 @@ throw( InvalidMessage )
+     validate();
+ }
+ 
++#ifdef SWIFTFIX_ENABLE_PREPARSE
++void Message::setFromPreScan( const PreScanField* fields, std::size_t n,
++                              bool doValidation,
++                              const DataDictionary* pSessionDataDictionary,
++                              const DataDictionary* /*pApplicationDataDictionary*/ )
++throw( InvalidMessage )
++{
++  clear();
++
++  FIX::MsgType msg;
++  field_type type = header;
++
++  for ( std::size_t i = 0; i < n; ++i )
++  {
++    const PreScanField& pf = fields[ i ];
++
++    // The metrics-eager FieldBase constructor expects tag_end to be one
++    // past the terminating <SOH>; PreScanField.value_end points AT the
++    // <SOH> (matching swiftfix::FieldEntry), hence the +1.
++    FieldBase field( pf.tag,
++                     pf.value_start, pf.value_end,
++                     pf.tag_start,   pf.value_end + 1 );
++
++    if ( isHeaderField( field, pSessionDataDictionary ) )
++    {
++      if ( type != header )
++      {
++        if ( m_tag == 0 ) m_tag = field.getTag();
++        m_validStructure = false;
++      }
++
++      if ( field.getTag() == FIELD::MsgType )
++        msg.setString( field.getString() );
++
++      m_header.appendField( field );
++    }
++    else if ( isTrailerField( field, pSessionDataDictionary ) )
++    {
++      type = trailer;
++      m_trailer.appendField( field );
++    }
++    else
++    {
++      if ( type == trailer )
++      {
++        if ( m_tag == 0 ) m_tag = field.getTag();
++        m_validStructure = false;
++      }
++      type = body;
++      appendField( field );
++    }
++  }
++
++  m_header.sortFields();
++  sortFields();
++  m_trailer.sortFields();
++
++  // Phase 1: no repeating-group expansion. pApplicationDataDictionary
++  // is accepted so the signature parallels setString but is not
++  // consulted — caller routes group-bearing messages to setString.
++
++  if ( doValidation )
++    validate();
++}
++#endif
++
+ void Message::setGroup( const std::string& msg, const FieldBase& field,
+                         const std::string& string,
+                         std::string::size_type& pos, FieldMap& map,
+diff --git a/src/C++/Message.h b/src/C++/Message.h
+index 7abe9c43..c2490762 100644
+--- a/src/C++/Message.h
++++ b/src/C++/Message.h
+@@ -38,6 +38,29 @@
+ namespace FIX
+ {
+ 
++#ifdef SWIFTFIX_ENABLE_PREPARSE
++/// SwiftFIX: one field-boundary triple produced by the pre-parser.
++/// Message::setFromPreScan consumes an array of these instead of
++/// rescanning the raw wire bytes.
++///
++/// Pointers are absolute into the buffer the scanner was called with
++/// and must outlive the setFromPreScan call.
++///
++///   tag_start   first byte of the tag digits
++///   value_start byte after the '=' separator (first value byte)
++///   value_end   byte AT the terminating <SOH> (0x01)
++///
++/// Layout mirrors swiftfix::FieldEntry one-for-one (modulo offset-vs-
++/// pointer); translation in the shim is pointer arithmetic.
++struct PreScanField
++{
++  int         tag;
++  const char* tag_start;
++  const char* value_start;
++  const char* value_end;
++};
++#endif
++
+ class Header : public FieldMap
+ {
+   enum { REQUIRED_FIELDS = 8 };
+@@ -230,6 +253,24 @@ public:
+                   const FIX::DataDictionary* pApplicationDataDictionary )
+   throw( InvalidMessage );
+ 
++#ifdef SWIFTFIX_ENABLE_PREPARSE
++  /// SwiftFIX fast path: populate from a pre-scanned field array.
++  ///
++  /// Header/body/trailer partitioning and the trailing sortFields calls
++  /// mirror setString exactly, so a message built via this path is
++  /// indistinguishable from one built via setString(validate=false) as
++  /// long as `fields` describes a valid FIX frame in wire order.
++  ///
++  /// Not safe for messages containing repeating groups in phase 1 —
++  /// caller must route those to setString (the swiftfix scanner signals
++  /// this via ScanStatus::FallbackRequested).
++  void setFromPreScan( const PreScanField* fields, std::size_t n,
++                       bool doValidation = false,
++                       const FIX::DataDictionary* pSessionDataDictionary = 0,
++                       const FIX::DataDictionary* pApplicationDataDictionary = 0 )
++  throw( InvalidMessage );
++#endif
++
+   void setGroup( const std::string& msg, const FieldBase& field,
+                  const std::string& string, std::string::size_type& pos,
+                  FieldMap& map, const DataDictionary& dataDictionary );
+-- 
+2.40.0

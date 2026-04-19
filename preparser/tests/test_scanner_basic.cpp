@@ -1,9 +1,9 @@
-// test_scanner_basic.cpp — Phase 0 smoke test.
+// test_scanner_basic.cpp — Phase 1 smoke test.
 //
 // Confirms that the preparser headers compile, symbols link, and the
-// dispatcher returns a non-null scalar scanner. Does *not* exercise parsing
-// — the scalar scanner is still a stub that returns FallbackRequested by
-// design. Real parsing tests land when the scalar implementation does.
+// dispatcher returns a non-null scalar scanner. Deeper parsing coverage
+// (header stages, body loop, checksum, fallback cases) lives in
+// test_scanner_scalar.cpp when that file lands.
 #include <cstddef>
 #include <span>
 
@@ -28,14 +28,15 @@ TEST(ScannerBasic, Avx2ScannerNotWiredUpYet) {
     EXPECT_EQ(swiftfix::scanner_for(swiftfix::ScannerKind::Avx2), nullptr);
 }
 
-TEST(ScannerBasic, ScalarStubReportsFallback) {
-    // The scalar scanner is declared but not implemented; it must return
-    // FallbackRequested so callers defer to stock QuickFIX.
+TEST(ScannerBasic, EmptyBufferIsTruncated) {
+    // An empty buffer is consistent with a frame in progress — the scanner
+    // must report Truncated so the caller can accumulate more bytes rather
+    // than treating it as malformed.
     auto& s = swiftfix::default_scanner();
     swiftfix::FieldIndex idx;
     std::byte buf[1]{};
     auto status = s.scan(std::span<const std::byte>(buf, 0), idx);
-    EXPECT_EQ(status, swiftfix::ScanStatus::FallbackRequested);
+    EXPECT_EQ(status, swiftfix::ScanStatus::Truncated);
 }
 
 TEST(ScannerBasic, StatusToStringIsNotEmpty) {

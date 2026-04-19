@@ -1,8 +1,10 @@
-// quickfix_shim.cpp — implementation stubs.
+// quickfix_shim.cpp — implementation.
 //
-// Phase 0: preparse is disabled by default and every call falls straight
-// through to FIX::Message::setString. Once the scalar scanner lands and
-// the QuickFIX patch series is in place, this file wires them together.
+// Phase 1: preparse is disabled by default and every parse_into call falls
+// straight through to FIX::Message::setString. When the QuickFIX patch
+// series lands, apply_field_index() gets a real body and the preparse path
+// becomes the fast path. See integration/patches/README.md for the patch
+// plan and docs/fallback_policy.md for when we fall back.
 #include "swiftfix/quickfix_shim.hpp"
 
 #include <atomic>
@@ -18,23 +20,36 @@ namespace {
 
 std::atomic<bool> g_preparse_enabled{false};
 
-struct AtomicStats {
-    std::atomic<std::uint64_t> preparse_attempted{0};
-    std::atomic<std::uint64_t> preparse_succeeded{0};
-    std::atomic<std::uint64_t> fallback_used{0};
-    std::atomic<std::uint64_t> parse_failed{0};
-};
-
-AtomicStats& stats() {
-    static AtomicStats s;
-    return s;
-}
-
 bool stock_parse(std::span<const std::byte> buffer, FIX::Message& out) {
     try {
         std::string raw(reinterpret_cast<const char*>(buffer.data()),
                         buffer.size());
         out.setString(raw, /*validate=*/false);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Translate FieldEntry (offset-based) to PreScanField (pointer-based) in
+// `scratch`, then hand the array to FIX::Message::setFromPreScan. Returns
+// false if QuickFIX rejected the field list, so the caller falls back.
+bool apply_field_index(const FieldIndex& idx,
+                       std::span<const std::byte> buffer,
+                       FIX::Message& out,
+                       FIX::PreScanField* scratch) {
+    const char* const base = reinterpret_cast<const char*>(buffer.data());
+    for (std::uint32_t i = 0; i < idx.field_count; ++i) {
+        const auto& e = idx.fields[i];
+        scratch[i] = FIX::PreScanField{
+            static_cast<int>(e.tag_number),
+            base + e.tag_start,
+            base + e.value_start,
+            base + e.value_end,
+        };
+    }
+    try {
+        out.setFromPreScan(scratch, idx.field_count, /*doValidation=*/false);
         return true;
     } catch (...) {
         return false;
@@ -51,50 +66,25 @@ bool preparse_enabled() noexcept {
     return g_preparse_enabled.load(std::memory_order_acquire);
 }
 
-bool parse_into(std::span<const std::byte> buffer, FIX::Message& out) {
+bool SessionShim::parse_into(std::span<const std::byte> buffer,
+                             FIX::Message& out) {
     if (!preparse_enabled()) {
         bool ok = stock_parse(buffer, out);
-        if (!ok) stats().parse_failed.fetch_add(1, std::memory_order_relaxed);
+        if (!ok) ++stats_.parse_failed;
         return ok;
     }
 
-    // TODO(phase3): when the scalar scanner is non-stub, attempt preparse
-    // and only fall through on non-Ok ScanStatus.
-    //
-    //     swiftfix::FieldIndex idx;
-    //     auto status = swiftfix::default_scanner().scan(buffer, idx);
-    //     stats().preparse_attempted.fetch_add(1);
-    //     if (status == ScanStatus::Ok) {
-    //         if (apply_field_index(idx, buffer, out)) {
-    //             stats().preparse_succeeded.fetch_add(1);
-    //             return true;
-    //         }
-    //     }
-    //     stats().fallback_used.fetch_add(1);
-    //     return stock_parse(buffer, out);
-
-    stats().fallback_used.fetch_add(1, std::memory_order_relaxed);
-    bool ok = stock_parse(buffer, out);
-    if (!ok) stats().parse_failed.fetch_add(1, std::memory_order_relaxed);
+    ++stats_.preparse_attempted;
+    const auto s = default_scanner().scan(buffer, idx_);
+    if (s == ScanStatus::Ok &&
+        apply_field_index(idx_, buffer, out, scratch_.data())) {
+        ++stats_.preparse_succeeded;
+        return true;
+    }
+    ++stats_.fallback_used;
+    const bool ok = stock_parse(buffer, out);
+    if (!ok) ++stats_.parse_failed;
     return ok;
-}
-
-ShimStats snapshot_stats() noexcept {
-    auto& s = stats();
-    return ShimStats{
-        s.preparse_attempted.load(std::memory_order_relaxed),
-        s.preparse_succeeded.load(std::memory_order_relaxed),
-        s.fallback_used.load(std::memory_order_relaxed),
-        s.parse_failed.load(std::memory_order_relaxed),
-    };
-}
-
-void reset_stats() noexcept {
-    auto& s = stats();
-    s.preparse_attempted.store(0, std::memory_order_relaxed);
-    s.preparse_succeeded.store(0, std::memory_order_relaxed);
-    s.fallback_used.store(0, std::memory_order_relaxed);
-    s.parse_failed.store(0, std::memory_order_relaxed);
 }
 
 }  // namespace swiftfix::shim

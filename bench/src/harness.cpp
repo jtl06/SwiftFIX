@@ -13,6 +13,9 @@
 #include <quickfix/Parser.h>
 
 #include "replay.hpp"
+#include "swiftfix/field_index.hpp"
+#include "swiftfix/scanner.hpp"
+#include "swiftfix/status.hpp"
 
 namespace swiftfix::bench {
 
@@ -153,6 +156,46 @@ void BM_QuickFIX_StreamParse(benchmark::State& state) {
                             static_cast<std::int64_t>(stream.size()));
 }
 
+// SwiftFIX scalar pre-parser: scan the stream frame-by-frame, advancing by
+// idx.frame_length. Apples-to-apples counterpart to BM_QuickFIX_StreamSplit —
+// both produce frame boundaries, neither builds FIX::Message objects. The
+// delta is the cost of the scalar scanner vs. FIX::Parser::readFixMessage.
+void BM_SwiftFIX_ScalarSplit(benchmark::State& state) {
+    const auto& stream = stream_corpus();
+    if (stream.empty()) {
+        state.SkipWithError("stream is empty");
+        return;
+    }
+
+    std::int64_t msg_count = 0;
+    auto& scanner = swiftfix::default_scanner();
+    swiftfix::FieldIndex idx;
+
+    for (auto _ : state) {
+        std::size_t pos = 0;
+        std::int64_t iter_count = 0;
+        while (pos < stream.size()) {
+            const auto* p = reinterpret_cast<const std::byte*>(
+                stream.data() + pos);
+            std::span<const std::byte> span(p, stream.size() - pos);
+            const auto s = scanner.scan(span, idx);
+            if (s != swiftfix::ScanStatus::Ok) {
+                state.SkipWithError("scanner returned non-Ok on valid stream");
+                return;
+            }
+            benchmark::DoNotOptimize(idx);
+            pos += idx.frame_length;
+            ++iter_count;
+        }
+        msg_count = iter_count;
+    }
+
+    state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) *
+                            msg_count);
+    state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations()) *
+                            static_cast<std::int64_t>(stream.size()));
+}
+
 auto p50 = [](const std::vector<double>& v) {
     auto sorted = v;
     std::nth_element(sorted.begin(),
@@ -193,6 +236,8 @@ void register_benchmarks() {
             "QuickFIX_StreamSplit", BM_QuickFIX_StreamSplit));
         configure(benchmark::RegisterBenchmark(
             "QuickFIX_StreamParse", BM_QuickFIX_StreamParse));
+        configure(benchmark::RegisterBenchmark(
+            "SwiftFIX_ScalarSplit", BM_SwiftFIX_ScalarSplit));
     } else {
         configure(benchmark::RegisterBenchmark(
             "QuickFIX_SetString", BM_QuickFIX_SetString));

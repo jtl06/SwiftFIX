@@ -12,31 +12,45 @@ namespace swiftfix {
 enum class ScanStatus : std::uint8_t {
     Ok = 0,
 
-    // The buffer does not contain a complete FIX message yet. Not an error —
+    // The buffer ended before a complete frame could be proven. The bytes
+    // seen so far are consistent with a FIX frame in progress — either the
+    // declared body length extends past buffer.size(), or the checksum
+    // field's terminating <SOH> has not yet been observed. Not an error:
     // the caller should accumulate more bytes and retry.
     Truncated,
 
-    // The buffer starts with something that is not a valid FIX begin-string
-    // (tag 8), or contains a byte sequence that cannot be a FIX tag-value frame.
+    // The bytes examined cannot form a valid FIX tag-value frame regardless
+    // of what follows. Examples: input does not start with "8=", a non-digit
+    // byte appears where a tag digit is required, '=' is missing from a
+    // tag/value pair, or <SOH> is missing where it is required.
     Malformed,
 
-    // Header tags (8, 9, 35) were not found in the expected canonical order.
-    // QuickFIX itself will reject this, but flagging early lets us skip
-    // building a field-boundary table.
+    // The frame is structurally a tag-value sequence, but the canonical
+    // header ordering (tag 8 then 9 then 35, all three present) was not
+    // observed. QuickFIX would reject such a frame; flagging it early lets
+    // us skip building a field-boundary table.
     BadHeader,
 
-    // Tag 9 (BodyLength) was present and parseable, but the byte count it
-    // declares is inconsistent with the <SOH> structure of the frame.
+    // Tag 9 (BodyLength) parsed as a non-negative integer, but the measured
+    // body span — bytes from the <SOH> after tag 9 up to the <SOH> before
+    // the checksum field — disagrees with the declared length.
     BadBodyLength,
 
-    // The pre-parser refuses to handle this message and wants the caller to
-    // fall back to stock QuickFIX parsing. Reserved for edge cases the scalar
-    // fallback covers that the SIMD fast path does not (e.g. certain RawData
-    // layouts). See docs/embedded_data.md.
+    // Scanner policy chose not to emit an index for this frame. This is NOT
+    // a verdict on the frame's validity — the frame may be well-formed FIX
+    // that the scanner (scalar or SIMD) declines to process in the current
+    // phase. Example: scalar phase 1 returns FallbackRequested when it
+    // encounters a length-prefixed embedded-data tag (95/96) rather than
+    // hardcoding skip logic for every variant; a future SIMD path may
+    // return it for constructs its kernel cannot handle. The status is
+    // shared across scanner kinds — what triggers it differs per kind.
+    // See docs/fallback_policy.md and docs/embedded_data.md.
     FallbackRequested,
 
-    // Field-boundary table would exceed preconfigured capacity. The caller
-    // should fall back; this is not necessarily a malformed frame.
+    // The frame exceeded the inline field-table capacity (kMaxFields) before
+    // the scanner reached the end. Resource limit, not a policy choice: the
+    // message may be perfectly valid FIX, but this scanner cannot represent
+    // it. Caller falls back to stock parsing.
     TableFull,
 };
 
