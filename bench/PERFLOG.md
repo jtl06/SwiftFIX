@@ -50,3 +50,20 @@ Replaced cursor/index arithmetic in `scan_one_field` with a `const unsigned char
 | Branches/msg      | 453     | 453     | flat       |
 | L1-D misses/msg   | 0.76    | 0.21    | -72%       |
 | IPC               | 3.78    | 3.85    | +2%        |
+
+---
+
+## 2026-04-19 — special-case fixed header (tags 8 / 9 / 35)
+
+Single ≥12-byte buffer precheck, then literal `"8="` / `"9="` / `"35="` matches. Tag-9 digit parse fused with its SOH scan (drops `parse_uint` call on the hot path).
+
+| Metric            | Before  | After   | Δ          |
+|-------------------|---------|---------|------------|
+| p50 time          | 121 µs  | 116 µs  | -4%        |
+| Throughput        | 1.227 GiB/s | 1.275 GiB/s | +3.9% |
+| Msg/s             | 8.26 M  | 8.59 M  | +4.0%      |
+| Instructions/msg  | 1,761   | 1,706   | -3.1%      |
+| Cycles/msg        | 458     | 439     | -4.1%      |
+| Branches/msg      | 453     | 428     | -5.5%      |
+| L1-D misses/msg   | 0.21    | 0.33    | +0.12      |
+| IPC               | 3.85    | 3.89    | +1%        |

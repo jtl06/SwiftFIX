@@ -11,63 +11,78 @@ class ScalarScanner final : public Scanner {
   public:
 
     ScanStatus scan(std::span<const std::byte> buffer, FieldIndex& out) noexcept override {
-        //reset buffer
         out.reset();
 
-        //check if empty 
-        if (buffer.empty()) return ScanStatus::Truncated;
+        // header check
+        if (buffer.size() < 12) return ScanStatus::Truncated;
 
-        //init
-        std::size_t i = 0;
-        FieldEntry entry;
+        const unsigned char* const base = reinterpret_cast<const unsigned char*>(buffer.data());
+        const unsigned char* const end  = base + buffer.size();
+        const unsigned char*       p    = base;
 
-        // first entry - begin string
-        switch (scan_one_field(buffer, i, entry)) {
-            case FieldScan::Ok:        break;
-            case FieldScan::Truncated: return ScanStatus::Truncated;
-            case FieldScan::Malformed: return ScanStatus::Malformed;
-        }
-        //check if 8
-        if (entry.tag_number != 8) return ScanStatus::BadHeader;
-        
-        //set fast access slot
+        // tag 8
+        if (p[0] != '8' || p[1] != '=') return ScanStatus::BadHeader;
+        const unsigned char* const t8_start = p;
+        p += 2;
+        const unsigned char* const v8_start = p;
+        while (p < end && *p != 0x01) ++p;
+        if (p == end) return ScanStatus::Truncated;
         out.begin_string_idx = static_cast<std::int32_t>(out.field_count);
-        out.fields[out.field_count++] = entry;
+        out.fields[out.field_count++] = FieldEntry{
+            static_cast<std::uint32_t>(t8_start - base),
+            static_cast<std::uint32_t>(v8_start - base),
+            static_cast<std::uint32_t>(p - base),
+            8,
+        };
+        ++p;  // past SOH
 
-        
-        //second entry - body length
-        switch (scan_one_field(buffer, i, entry)) {
-            case FieldScan::Ok:        break;
-            case FieldScan::Truncated: return ScanStatus::Truncated;
-            case FieldScan::Malformed: return ScanStatus::Malformed;
-        }
-        //check if 9
-        if (entry.tag_number != 9) return ScanStatus::BadHeader;
-        //set fast access slot
-        out.body_length_idx = static_cast<std::int32_t>(out.field_count);
-        //set body length
+        // tag 9
+        if (p[0] != '9' || p[1] != '=') return ScanStatus::BadHeader;
+        const unsigned char* const t9_start = p;
+        p += 2;
+        const unsigned char* const v9_start = p;
         std::uint32_t body_len = 0;
-        if (!parse_uint(buffer, entry.value_start, entry.value_end, body_len))
-            return ScanStatus::Malformed;
+        while (p < end && *p != 0x01) {
+            if (!is_digit(*p))                    return ScanStatus::Malformed;
+            if (body_len > (UINT32_MAX - 9) / 10) return ScanStatus::Malformed;
+            body_len = body_len * 10 + (*p - '0');
+            ++p;
+        }
+        if (p == end)      return ScanStatus::Truncated;
+        if (p == v9_start) return ScanStatus::Malformed;  // empty body length
+        out.body_length_idx = static_cast<std::int32_t>(out.field_count);
         out.declared_body_length = body_len;
-        out.fields[out.field_count++] = entry;
+        out.fields[out.field_count++] = FieldEntry{
+            static_cast<std::uint32_t>(t9_start - base),
+            static_cast<std::uint32_t>(v9_start - base),
+            static_cast<std::uint32_t>(p        - base),
+            9,
+        };
+        ++p;  // past SOH
 
-        // check if buffer fits 
-        const std::size_t body_start = i;
+        // body bounds check
+        const std::size_t body_start = static_cast<std::size_t>(p - base);
         const std::size_t body_end   = body_start + body_len;
         if (body_end + 7 > buffer.size()) return ScanStatus::Truncated;
 
-        //third entry - should be 35
-        switch (scan_one_field(buffer, i, entry)) {
-            case FieldScan::Ok:        break;
-            case FieldScan::Truncated: return ScanStatus::Truncated;
-            case FieldScan::Malformed: return ScanStatus::Malformed;
-        }
-        //check 35
-        if (entry.tag_number != 35) return ScanStatus::BadHeader;
-        //set fast access slot
+        // tag 35
+        if (p[0] != '3' || p[1] != '5' || p[2] != '=') return ScanStatus::BadHeader;
+        const unsigned char* const t35_start = p;
+        p += 3;
+        const unsigned char* const v35_start = p;
+        while (p < end && *p != 0x01) ++p;
+        if (p == end) return ScanStatus::Truncated;
         out.msg_type_idx = static_cast<std::int32_t>(out.field_count);
-        out.fields[out.field_count++] = entry;
+        out.fields[out.field_count++] = FieldEntry{
+            static_cast<std::uint32_t>(t35_start - base),
+            static_cast<std::uint32_t>(v35_start - base),
+            static_cast<std::uint32_t>(p         - base),
+            35,
+        };
+        ++p;  // past SOH
+
+        std::size_t i = static_cast<std::size_t>(p - base);
+        FieldEntry entry;
 
         // main body loop
         while (i < body_end) {
@@ -112,9 +127,7 @@ class ScalarScanner final : public Scanner {
 
     // Scans one "tag=value<SOH>" triple starting at buffer[cursor]. On Ok,
     // fills `entry` and advances `cursor` to the byte just past the
-    // terminating <SOH>. On Truncated, the buffer ended mid-field with a
-    // prefix that could still complete. On Malformed, the bytes seen cannot
-    // form a valid field regardless of continuation.
+    // terminating <SOH>. 
     static FieldScan scan_one_field(std::span<const std::byte> buffer, std::size_t& cursor,
                                     FieldEntry& entry) noexcept {
         const unsigned char* const base      = reinterpret_cast<const unsigned char*>(buffer.data());
@@ -158,9 +171,7 @@ class ScalarScanner final : public Scanner {
     }
 
     // Parses buffer[from, to) as a base-10 uint32. Returns false on a
-    // non-digit byte, an empty range, or overflow. Used for tag 9 (body
-    // length) in stage 2 and will be reused for the 3-digit checksum in
-    // stage 5.
+    // non-digit byte, an empty range, or overflow.
     static bool parse_uint(std::span<const std::byte> buffer,
                            std::size_t from, std::size_t to,
                            std::uint32_t& out) noexcept {
