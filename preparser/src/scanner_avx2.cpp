@@ -1,11 +1,11 @@
 // scanner_avx2.cpp — AVX2 SIMD implementation.
 //
-// Starting point: verbatim copy of the scalar scanner. Replace the hot
-// loops (tag scans, SOH scans) with AVX2 intrinsics incrementally.
+// Shape: scalar tag parse + scalar header specialization (tags 8/9/35),
+// AVX2 only on the value-SOH scan (the wide span). The eq-byte is at most
+// a few bytes after the tag start, so SIMD doesn't pay there.
 // Runtime dispatch gates entry via avx2_is_available_at_runtime().
 #include "swiftfix/scanner.hpp"
 
-//include avx2 intrinsics
 #include <immintrin.h>
 #include <bit>
 
@@ -31,10 +31,8 @@ class Avx2Scanner final : public Scanner {
         const unsigned char* const t8_start = p;
         p += 2;
         const unsigned char* const v8_start = p;
-        
-        const unsigned char* const soh8_pos = find_soh_avx2(p, end);
-        if (!soh8_pos) [[unlikely]] return ScanStatus::Truncated;
-
+        while (p < end && *p != 0x01) ++p;
+        if (p == end) [[unlikely]] return ScanStatus::Truncated;
         out.begin_string_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = FieldEntry{
             static_cast<std::uint32_t>(t8_start - base),
@@ -42,7 +40,7 @@ class Avx2Scanner final : public Scanner {
             static_cast<std::uint32_t>(p - base),
             8,
         };
-        p = soh8_pos + 1; // past <SOH>
+        ++p;  // past SOH
 
         // tag 9
         if (p[0] != '9' || p[1] != '=') [[unlikely]] return ScanStatus::BadHeader;
@@ -54,7 +52,7 @@ class Avx2Scanner final : public Scanner {
             if (!is_digit(*p))                    [[unlikely]] return ScanStatus::Malformed;
             if (body_len > (UINT32_MAX - 9) / 10) [[unlikely]] return ScanStatus::Malformed;
             body_len = body_len * 10 + (*p - '0');
-            p++;
+            ++p;
         }
         if (p == end)      [[unlikely]] return ScanStatus::Truncated;
         if (p == v9_start) [[unlikely]] return ScanStatus::Malformed;  // empty body length
@@ -66,7 +64,7 @@ class Avx2Scanner final : public Scanner {
             static_cast<std::uint32_t>(p - base),
             9,
         };
-        p++;  // past SOH
+        ++p;  // past SOH
 
         // body bounds check
         const std::size_t body_start = static_cast<std::size_t>(p - base);
@@ -78,9 +76,8 @@ class Avx2Scanner final : public Scanner {
         const unsigned char* const t35_start = p;
         p += 3;
         const unsigned char* const v35_start = p;
-        const unsigned char* const soh35_pos = find_soh_avx2(p, end);
-        if (!soh35_pos) [[unlikely]] return ScanStatus::Truncated;
-        
+        while (p < end && *p != 0x01) ++p;
+        if (p == end) [[unlikely]] return ScanStatus::Truncated;
         out.msg_type_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = FieldEntry{
             static_cast<std::uint32_t>(t35_start - base),
@@ -88,7 +85,7 @@ class Avx2Scanner final : public Scanner {
             static_cast<std::uint32_t>(p         - base),
             35,
         };
-        p = soh35_pos + 1; // past <SOH>
+        ++p;  // past SOH
 
         const unsigned char* const body_end_ptr = base + body_end;
         FieldEntry entry;
@@ -96,7 +93,7 @@ class Avx2Scanner final : public Scanner {
         // main body loop
         while (p < body_end_ptr) {
             if (out.field_count >= kMaxFields) [[unlikely]] return ScanStatus::TableFull;
-            switch (scan_one_field_avx2(p, end, base, entry)) {
+            switch (scan_one_field(p, end, base, entry)) {
                 case FieldScan::Ok:        break;
                 [[unlikely]] case FieldScan::Truncated: return ScanStatus::Truncated;
                 [[unlikely]] case FieldScan::Malformed: return ScanStatus::Malformed;
@@ -109,7 +106,7 @@ class Avx2Scanner final : public Scanner {
         if (p != body_end_ptr) [[unlikely]] return ScanStatus::BadBodyLength;
 
         // check ending and checksum
-        switch (scan_one_field_avx2(p, end, base, entry)) {
+        switch (scan_one_field(p, end, base, entry)) {
             case FieldScan::Ok:        break;
             [[unlikely]] case FieldScan::Truncated: return ScanStatus::Truncated;
             [[unlikely]] case FieldScan::Malformed: return ScanStatus::Malformed;
@@ -117,9 +114,11 @@ class Avx2Scanner final : public Scanner {
         //check if 10
         if (entry.tag_number != 10) [[unlikely]] return ScanStatus::BadBodyLength;
         if (entry.value_end - entry.value_start != 3) [[unlikely]] return ScanStatus::Malformed;
-        // check 3 bytes are digits. checksum handled by quickfix
-        [[maybe_unused]] std::uint32_t cksum_value = 0;
-        if (!parse_uint(buffer, entry.value_start, entry.value_end, cksum_value)) [[unlikely]]
+        // FIX checksum is exactly 3 ASCII digits; value math handled by quickfix.
+        const unsigned char* const v = base + entry.value_start;
+        if (((v[0] - '0') > 9u) ||
+            ((v[1] - '0') > 9u) ||
+            ((v[2] - '0') > 9u)) [[unlikely]]
             return ScanStatus::Malformed;
 
         //set fast access slot
@@ -134,11 +133,9 @@ class Avx2Scanner final : public Scanner {
   private:
     enum class FieldScan { Ok, Truncated, Malformed };
 
-    // Scans one "tag=value<SOH>" triple starting at *p. On Ok, fills
-    // `entry` (with offsets relative to `base`) and advances `p` to the
-    // byte just past the terminating <SOH>. `end` and `base` are the
-    // caller's precomputed buffer bounds/origin.
-    static FieldScan scan_one_field_avx2(const unsigned char*& p,
+    // Scalar tag parse + AVX2 value-SOH scan. Tags are short (1–4 bytes
+    // typical), so SIMD on the eq-search isn't worth the bookkeeping.
+    static FieldScan scan_one_field(const unsigned char*& p,
                                     const unsigned char* end,
                                     const unsigned char* base,
                                     FieldEntry& entry) noexcept {
@@ -165,7 +162,7 @@ class Avx2Scanner final : public Scanner {
 
         const unsigned char* const soh_pos = find_soh_avx2(p, end);
         if (!soh_pos) [[unlikely]] return FieldScan::Truncated;
-        p = soh_pos + 1; // past <SOH>
+        p = soh_pos + 1;  // past <SOH>
 
         entry = FieldEntry{
             static_cast<std::uint32_t>(tag_start - base),
@@ -176,49 +173,24 @@ class Avx2Scanner final : public Scanner {
         return FieldScan::Ok;
     }
 
-    // Parses buffer[from, to) as a base-10 uint32. Returns false on a
-    // non-digit byte, an empty range, or overflow.
-    static bool parse_uint(std::span<const std::byte> buffer,
-                           std::size_t from, std::size_t to,
-                           std::uint32_t& out) noexcept {
-        if (from == to) [[unlikely]] return false;
-        std::uint32_t v = 0;
-        const unsigned char* p = reinterpret_cast<const unsigned char*>(buffer.data()) + from;
-        const unsigned char* end = reinterpret_cast<const unsigned char*>(buffer.data()) + to;
-        while (p < end) {
-            const unsigned c = *p++;
-            if (!is_digit(c)) [[unlikely]] return false;
-            if (v > (UINT32_MAX - 9) / 10) [[unlikely]] return false;   // overflow guard
-            v = v * 10 + (c - '0');
-        }
-        out = v;
-        return true;
-    }
-    
-    //returns digit if between 0 and 9
     static constexpr bool is_digit(unsigned c) noexcept { return (c - '0') <= 9u; }
 
-    //finds soh using avx2
-    static const unsigned char*  find_soh_avx2(const unsigned char* p, const unsigned char* end) noexcept{
-        #if defined(__AVX2__)
-            const __m256i target = _mm256_set1_epi8(0x01);
-            
-            while (static_cast<std::size_t>(end - p) >= 32){
-                const __m256i vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+    // 32-byte AVX2 SOH scan with a scalar tail.
+    static const unsigned char* find_soh_avx2(const unsigned char* p,
+                                              const unsigned char* end) noexcept {
+        const __m256i target = _mm256_set1_epi8(0x01);
 
-                const __m256i res = _mm256_cmpeq_epi8(vec, target);
-
-                const std::uint32_t m0 = static_cast<std::uint32_t>(_mm256_movemask_epi8(res));
-
-                if (m0) return p + std::countr_zero(m0);
-
-                p += 32;
-            }
-        #endif
+        while (static_cast<std::size_t>(end - p) >= 32) {
+            const __m256i vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
+            const __m256i res = _mm256_cmpeq_epi8(vec, target);
+            const std::uint32_t mask = static_cast<std::uint32_t>(_mm256_movemask_epi8(res));
+            if (mask) return p + std::countr_zero(mask);
+            p += 32;
+        }
 
         while (p < end) {
             if (*p == 0x01) return p;
-            p++;
+            ++p;
         }
         return nullptr;
     }

@@ -12,6 +12,11 @@
 #include "swiftfix/scanner.hpp"
 #include "swiftfix/status.hpp"
 
+namespace swiftfix {
+// Defined in preparser/src/scanner_avx2.cpp; not in the public header.
+bool avx2_is_available_at_runtime() noexcept;
+}  // namespace swiftfix
+
 TEST(ScannerBasic, DefaultScannerReturnsScalarOrAvx2) {
     auto& s = swiftfix::default_scanner();
     EXPECT_TRUE(s.kind() == swiftfix::ScannerKind::Scalar ||
@@ -24,10 +29,14 @@ TEST(ScannerBasic, ScalarScannerIsAddressable) {
     EXPECT_EQ(s->kind(), swiftfix::ScannerKind::Scalar);
 }
 
-TEST(ScannerBasic, Avx2ScannerIsAddressable) {
+TEST(ScannerBasic, Avx2ScannerMatchesRuntimeProbe) {
     auto* s = swiftfix::scanner_for(swiftfix::ScannerKind::Avx2);
-    ASSERT_NE(s, nullptr);
-    EXPECT_EQ(s->kind(), swiftfix::ScannerKind::Avx2);
+    if (swiftfix::avx2_is_available_at_runtime()) {
+        ASSERT_NE(s, nullptr);
+        EXPECT_EQ(s->kind(), swiftfix::ScannerKind::Avx2);
+    } else {
+        EXPECT_EQ(s, nullptr);
+    }
 }
 
 TEST(ScannerBasic, EmptyBufferIsTruncated) {

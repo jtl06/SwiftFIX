@@ -108,9 +108,11 @@ class ScalarScanner final : public Scanner {
         //check if 10
         if (entry.tag_number != 10) [[unlikely]] return ScanStatus::BadBodyLength;
         if (entry.value_end - entry.value_start != 3) [[unlikely]] return ScanStatus::Malformed;
-        // check 3 bytes are digits. checksum handled by quickfix
-        [[maybe_unused]] std::uint32_t cksum_value = 0;
-        if (!parse_uint(buffer, entry.value_start, entry.value_end, cksum_value)) [[unlikely]]
+        // FIX checksum is exactly 3 ASCII digits; value math handled by quickfix.
+        const unsigned char* const v = base + entry.value_start;
+        if (((v[0] - '0') > 9u) ||
+            ((v[1] - '0') > 9u) ||
+            ((v[2] - '0') > 9u)) [[unlikely]]
             return ScanStatus::Malformed;
 
         //set fast access slot
@@ -167,25 +169,6 @@ class ScalarScanner final : public Scanner {
             tag,
         };
         return FieldScan::Ok;
-    }
-
-    // Parses buffer[from, to) as a base-10 uint32. Returns false on a
-    // non-digit byte, an empty range, or overflow.
-    static bool parse_uint(std::span<const std::byte> buffer,
-                           std::size_t from, std::size_t to,
-                           std::uint32_t& out) noexcept {
-        if (from == to) [[unlikely]] return false;
-        std::uint32_t v = 0;
-        const unsigned char* p = reinterpret_cast<const unsigned char*>(buffer.data()) + from;
-        const unsigned char* end = reinterpret_cast<const unsigned char*>(buffer.data()) + to;
-        while (p < end) {
-            const unsigned c = *p++;
-            if (!is_digit(c)) [[unlikely]] return false;
-            if (v > (UINT32_MAX - 9) / 10) [[unlikely]] return false;   // overflow guard
-            v = v * 10 + (c - '0');
-        }
-        out = v;
-        return true;    
     }
 
     //returns digit if between 0 and 9

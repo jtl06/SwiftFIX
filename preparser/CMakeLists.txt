@@ -5,6 +5,12 @@ add_library(swiftfix STATIC
     src/scanner_avx2.cpp
     src/dispatch.cpp)
 
+# AVX2 scanner needs -mavx2 regardless of global -march, so the TU compiles
+# on portable builds. Runtime dispatch in dispatch.cpp gates execution on
+# __builtin_cpu_supports("avx2") so non-AVX2 hosts never enter this path.
+set_source_files_properties(src/scanner_avx2.cpp
+    PROPERTIES COMPILE_OPTIONS "-mavx2")
+
 add_library(SwiftFIX::swiftfix ALIAS swiftfix)
 
 target_include_directories(swiftfix PUBLIC

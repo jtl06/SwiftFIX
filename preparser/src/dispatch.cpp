@@ -34,7 +34,8 @@ Scanner* scanner_for(ScannerKind kind) noexcept {
         case ScannerKind::Scalar:
             return &scalar_scanner_instance();
         case ScannerKind::Avx2:
-            return avx2_scanner_instance();
+            return avx2_is_available_at_runtime() ? avx2_scanner_instance()
+                                                  : nullptr;
         case ScannerKind::Avx512:
         case ScannerKind::Neon:
             // TODO(phase2/3): wire up once implementations exist.

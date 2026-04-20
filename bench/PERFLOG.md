@@ -125,3 +125,51 @@ New `Avx2Scanner` compiled alongside the scalar path; runtime dispatch via `__bu
 | Branches/msg      | 381     | 221     | -42%       |
 | L1-D misses/msg   | 0.065   | 0.066   | ~flat      |
 | IPC               | 3.86    | 3.77    | -2%        |
+
+---
+
+## 2026-04-19 — AVX2 on tag side too (regression, reverted)
+
+Tried widening AVX2 from value-SOH-only to a combined `=` + SOH scan inside `scan_one_field`, plus header tags 8 and 35 also routed through `find_soh_avx2`. The combined scan loaded 32-byte (and at one point 16-byte fallback) windows looking for both delimiters at once so the tag-digit loop could be range-based. **Regressed** — reverted to the prior shape (scalar tag walk, scalar headers, AVX2 only on the value SOH).
+
+| Metric            | AVX2 (SOH-only) | AVX2 (combined) | Δ          |
+|-------------------|-----------------|-----------------|------------|
+| Per msg          | 65.5 ns         | 100.2 ns        | +53%       |
+| Throughput        | 1.906 GiB/s     | 1.246 GiB/s     | -35%       |
+| Instructions/msg  | 1,114           | 1,247           | +12%       |
+| Cycles/msg        | 295             | 449             | +52%       |
+| Branches/msg      | 221             | 242             | +10%       |
+| L1-D misses/msg   | 0.066           | 0.219           | +3.3×      |
+
+Why it lost: tags are 1–4 bytes typical, so a 32-byte SIMD scan over the tag region reads ahead into bytes the tag walk would never have touched (extra L1 traffic) and the bookkeeping (`any_mask`, first-bit detect, `soh_after_eq` shift, plus a scalar tag-digit pass on the bytes the SIMD already loaded) costs more cycles than the byte-by-byte tag walk it replaced. The wide value scan stays a win because typical FIX values are tens to hundreds of bytes — well past the SIMD breakeven.
+
+---
+
+## 2026-04-19 — direct 3-byte digit check for tag 10
+
+FIX checksum is exactly 3 ASCII digits. Replaced the `parse_uint` call (loop, overflow guard, output write into a `[[maybe_unused]]` local) with three unrolled `(v[i] - '0') > 9u` compares. Applied to both scanners; `parse_uint` deleted from both TUs.
+
+| Metric            | Scalar (before) | Scalar (after) | AVX2 (before) | AVX2 (after) |
+|-------------------|-----------------|----------------|---------------|--------------|
+| p50 time          | 96.6 µs         | 100.0 µs *     | 75.8 µs       | 76.1 µs      |
+| Per msg           | 81.2 ns         | 84.0 ns *      | 63.7 ns       | 63.9 ns      |
+| Instructions/msg  | 1,417           | 1,387          | 1,140         | 1,110        |
+| Cycles/msg        | 362             | 376 *          | 289           | 285          |
+| Branches/msg      | 381             | 374            | 236           | 229          |
+
+\* Time/cycle deltas on the scalar column are within run-to-run noise (CV ~1.5%); instructions and branches drop is the real measured change. AVX2 dropped 30 ins/msg and 4 cyc/msg — small, free, no behavioral change since QuickFIX still validates the checksum value.
+
+---
+
+## 2026-04-19 — 64-byte unroll in `find_soh_avx2` (regression, reverted)
+
+Tried two 32-byte loads + cmpeq per loop iter, OR'd into a 64-bit mask, with a 32-byte tail. **Regressed +17%** on this corpus and was reverted.
+
+| Metric            | 32-byte step | 64-byte unroll | Δ          |
+|-------------------|--------------|----------------|------------|
+| p50 time          | 75.8 µs      | 88.7 µs        | +17%       |
+| Per msg           | 63.7 ns      | 74.6 ns        | +17%       |
+| Instructions/msg  | 1,110        | 1,099          | -1%        |
+| Cycles/msg        | 284          | 334            | +18%       |
+
+Why it lost: typical FIX values in `bulk.stream` are short (most fields fit in the first 32-byte window). The 64-byte unroll forces two loads + cmpeq + movemask before the mask check — wasted work whenever the SOH was in the first half. The unroll only pays when scans regularly run >32 bytes (long free-text fields, FIXML payloads, raw-data blocks). Worth re-trying if a corpus with longer values shows up.
