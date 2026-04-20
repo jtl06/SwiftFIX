@@ -12,9 +12,10 @@
 #include "swiftfix/scanner.hpp"
 #include "swiftfix/status.hpp"
 
-TEST(ScannerBasic, DefaultScannerReturnsScalarForNow) {
+TEST(ScannerBasic, DefaultScannerReturnsScalarOrAvx2) {
     auto& s = swiftfix::default_scanner();
-    EXPECT_EQ(s.kind(), swiftfix::ScannerKind::Scalar);
+    EXPECT_TRUE(s.kind() == swiftfix::ScannerKind::Scalar ||
+                s.kind() == swiftfix::ScannerKind::Avx2);
 }
 
 TEST(ScannerBasic, ScalarScannerIsAddressable) {
@@ -23,9 +24,10 @@ TEST(ScannerBasic, ScalarScannerIsAddressable) {
     EXPECT_EQ(s->kind(), swiftfix::ScannerKind::Scalar);
 }
 
-TEST(ScannerBasic, Avx2ScannerNotWiredUpYet) {
-    // Phase 0: AVX2 path is a stub. When phase 2 implements it, flip this.
-    EXPECT_EQ(swiftfix::scanner_for(swiftfix::ScannerKind::Avx2), nullptr);
+TEST(ScannerBasic, Avx2ScannerIsAddressable) {
+    auto* s = swiftfix::scanner_for(swiftfix::ScannerKind::Avx2);
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->kind(), swiftfix::ScannerKind::Avx2);
 }
 
 TEST(ScannerBasic, EmptyBufferIsTruncated) {

@@ -17,6 +17,11 @@
 #include "swiftfix/scanner.hpp"
 #include "swiftfix/status.hpp"
 
+namespace swiftfix {
+// Defined in preparser/src/scanner_avx2.cpp; not in the public header.
+bool avx2_is_available_at_runtime() noexcept;
+}  // namespace swiftfix
+
 namespace swiftfix::bench {
 
 namespace {
@@ -156,11 +161,12 @@ void BM_QuickFIX_StreamParse(benchmark::State& state) {
                             static_cast<std::int64_t>(stream.size()));
 }
 
-// SwiftFIX scalar pre-parser: scan the stream frame-by-frame, advancing by
+// SwiftFIX pre-parser split: scan the stream frame-by-frame, advancing by
 // idx.frame_length. Apples-to-apples counterpart to BM_QuickFIX_StreamSplit —
 // both produce frame boundaries, neither builds FIX::Message objects. The
-// delta is the cost of the scalar scanner vs. FIX::Parser::readFixMessage.
-void BM_SwiftFIX_ScalarSplit(benchmark::State& state) {
+// scanner (scalar / AVX2 / …) is injected by the caller so each ISA path
+// gets its own named benchmark.
+void run_swiftfix_split(benchmark::State& state, swiftfix::Scanner& scanner) {
     const auto& stream = stream_corpus();
     if (stream.empty()) {
         state.SkipWithError("stream is empty");
@@ -168,7 +174,6 @@ void BM_SwiftFIX_ScalarSplit(benchmark::State& state) {
     }
 
     std::int64_t msg_count = 0;
-    auto& scanner = swiftfix::default_scanner();
     swiftfix::FieldIndex idx;
 
     for (auto _ : state) {
@@ -237,7 +242,19 @@ void register_benchmarks() {
         configure(benchmark::RegisterBenchmark(
             "QuickFIX_StreamParse", BM_QuickFIX_StreamParse));
         configure(benchmark::RegisterBenchmark(
-            "SwiftFIX_ScalarSplit", BM_SwiftFIX_ScalarSplit));
+            "SwiftFIX_ScalarSplit",
+            [](benchmark::State& st) {
+                run_swiftfix_split(st,
+                    *swiftfix::scanner_for(swiftfix::ScannerKind::Scalar));
+            }));
+        if (auto* avx2 = swiftfix::scanner_for(swiftfix::ScannerKind::Avx2);
+            avx2 && swiftfix::avx2_is_available_at_runtime()) {
+            configure(benchmark::RegisterBenchmark(
+                "SwiftFIX_Avx2Split",
+                [avx2](benchmark::State& st) {
+                    run_swiftfix_split(st, *avx2);
+                }));
+        }
     } else {
         configure(benchmark::RegisterBenchmark(
             "QuickFIX_SetString", BM_QuickFIX_SetString));

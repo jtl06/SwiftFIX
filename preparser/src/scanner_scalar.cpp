@@ -25,7 +25,7 @@ class ScalarScanner final : public Scanner {
         const unsigned char* const t8_start = p;
         p += 2;
         const unsigned char* const v8_start = p;
-        while (p < end && *p != 0x01) ++p;
+        while (p < end && *p != 0x01) p++;
         if (p == end) [[unlikely]] return ScanStatus::Truncated;
         out.begin_string_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = FieldEntry{
@@ -34,7 +34,7 @@ class ScalarScanner final : public Scanner {
             static_cast<std::uint32_t>(p - base),
             8,
         };
-        ++p;  // past SOH
+        p++;  // past SOH
 
         // tag 9
         if (p[0] != '9' || p[1] != '=') [[unlikely]] return ScanStatus::BadHeader;
@@ -46,7 +46,7 @@ class ScalarScanner final : public Scanner {
             if (!is_digit(*p))                    [[unlikely]] return ScanStatus::Malformed;
             if (body_len > (UINT32_MAX - 9) / 10) [[unlikely]] return ScanStatus::Malformed;
             body_len = body_len * 10 + (*p - '0');
-            ++p;
+            p++;
         }
         if (p == end)      [[unlikely]] return ScanStatus::Truncated;
         if (p == v9_start) [[unlikely]] return ScanStatus::Malformed;  // empty body length
@@ -58,7 +58,7 @@ class ScalarScanner final : public Scanner {
             static_cast<std::uint32_t>(p - base),
             9,
         };
-        ++p;  // past SOH
+        p++;  // past SOH
 
         // body bounds check
         const std::size_t body_start = static_cast<std::size_t>(p - base);
@@ -70,7 +70,7 @@ class ScalarScanner final : public Scanner {
         const unsigned char* const t35_start = p;
         p += 3;
         const unsigned char* const v35_start = p;
-        while (p < end && *p != 0x01) ++p;
+        while (p < end && *p != 0x01) p++;
         if (p == end) [[unlikely]] return ScanStatus::Truncated;
         out.msg_type_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = FieldEntry{
@@ -79,7 +79,7 @@ class ScalarScanner final : public Scanner {
             static_cast<std::uint32_t>(p         - base),
             35,
         };
-        ++p;  // past SOH
+        p++;  // past SOH
 
         const unsigned char* const body_end_ptr = base + body_end;
         FieldEntry entry;

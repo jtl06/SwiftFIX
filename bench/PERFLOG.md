@@ -107,3 +107,21 @@ Replaced `(span, size_t& cursor)` with `(const unsigned char*& p, end, base)`. D
 | Branches/msg      | 380     | 381     | flat       |
 | L1-D misses/msg   | 0.04    | 0.05    | ~0         |
 | IPC               | 3.67    | 3.97    | +8%        |
+
+---
+
+## 2026-04-19 — AVX2 SOH scan (`SwiftFIX_Avx2Split`)
+
+New `Avx2Scanner` compiled alongside the scalar path; runtime dispatch via `__builtin_cpu_supports("avx2")`. Replaces the byte-by-byte `while (*p != 0x01)` SOH scan in tag 35 and `scan_one_field` with a 32-byte AVX2 compare (`_mm256_cmpeq_epi8` + `movemask` + `countr_zero`), falling back to the scalar loop for the tail. New dedicated bench `SwiftFIX_Avx2Split`; previous rows were the scalar path measured via `default_scanner()`, which is why the scalar column below matches historical numbers.
+
+| Metric            | Scalar  | AVX2    | Δ          |
+|-------------------|---------|---------|------------|
+| p50 time          | 96.8 µs | 77.9 µs | -20%       |
+| Per msg           | 81.4 ns | 65.5 ns | -20%       |
+| Throughput        | 1.535 GiB/s | 1.906 GiB/s | +24% |
+| Msg/s             | 10.34 M | 12.83 M | +24%       |
+| Instructions/msg  | 1,417   | 1,114   | -21%       |
+| Cycles/msg        | 367     | 295     | -20%       |
+| Branches/msg      | 381     | 221     | -42%       |
+| L1-D misses/msg   | 0.065   | 0.066   | ~flat      |
+| IPC               | 3.86    | 3.77    | -2%        |
