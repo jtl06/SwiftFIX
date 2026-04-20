@@ -34,6 +34,7 @@ is acceptable.
 | `rawdata/`            | Embedded-binary edge cases (tag 95/96). See           |
 |                       | `docs/embedded_data.md`                               |
 | `bulk.stream` *(file)*| Concatenated procedurally-generated frames for bench  |
+| `bulk25k.stream` *(file)*| 25k-message higher-variance stream (~5.77 MB, exceeds L2) |
 
 ## Generating the canonical `valid/` set
 
@@ -67,6 +68,22 @@ The harness auto-detects: if `SWIFTFIX_CORPUS` is a file, it runs the
 stream-parse benchmark (`FIX::Parser` does the splitting); if it's a
 directory, it runs the per-file benchmark (already-split frames fed
 straight into `Message::setString`).
+
+A larger, higher-variance stream lives at `bulk25k.stream` — 25,000
+messages (~5.77 MB, exceeds L2), with News (`35=B`) and MD-Incremental
+(`35=X`) added for longer free-text / deep-book variance. Regenerate
+with:
+
+```
+python3 corpus/generate.py --bulk 25000 --seed 3203386110 \
+    --bulk-stream corpus/bulk25k.stream
+```
+
+Note: stock QuickFIX's `FIX::Parser` scales poorly past a few MB
+(memmoves on each dequeue make splitting effectively O(N²) in stream
+size), so the QuickFIX baseline on this corpus isn't apples-to-apples
+with the SwiftFIX scanners. Use `bulk.stream` for clean scanner-vs-QF
+comparisons.
 
 ## Adding new messages
 

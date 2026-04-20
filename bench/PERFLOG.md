@@ -181,6 +181,28 @@ More total instructions (bulk SIMD pass scans body bytes, scalar pass still walk
 
 ---
 
+## 2026-04-19 — larger, higher-variance corpus (`bulk25k.stream`)
+
+New 25,000-message corpus at `corpus/bulk25k.stream` (~5.77 MB, exceeds L2). Adds News (`35=B`) and Market-Data Incremental (`35=X`) message types with long free-text / deep-book bursts, widens the Symbol / Sender / Target pools, and randomly tags ~15% of execution reports with `Text` (tag 58). Message-body sizes now span tens-of-bytes to hundreds-of-bytes; mean field-count per message is roughly 2× the old corpus.
+
+| Metric            | `StreamSplit` | `ScalarSplit` | `Avx2Split` | AVX2 vs Scalar | AVX2 vs StreamSplit |
+|-------------------|---------------|---------------|-------------|----------------|---------------------|
+| p50 time (25k)    | 2,276 ms      | 3,389 µs      | 2,334 µs    | -31%           | -99.9%              |
+| Per msg           | 91.0 µs       | 135.6 ns      | 93.4 ns     | -31%           | **975× faster**     |
+| Throughput        | 2.42 MiB/s    | 1.59 GiB/s    | 2.31 GiB/s  | +45%           | **975× higher**     |
+| Msg/s             | 11.0 k        | 7.38 M        | 10.72 M     | +45%           | **975× higher**     |
+| Instructions/msg  | 867           | 2,097         | 1,656       | -21%           | 1.9× more           |
+| Cycles/msg        | 407,552       | 608           | 418         | -31%           | **975× fewer**      |
+| Branches/msg      | 201           | 602           | 354         | -41%           | 1.8× more           |
+| L1-D misses/msg   | 32,757        | 0.11          | 0.61        | +0.5           | **~54,000× fewer**  |
+| IPC               | 0.002         | 3.45          | 3.96        | +15%           | **1,980× higher**   |
+
+AVX2 gains a bigger margin here than on the old 1190-msg corpus (-31% time vs -10%). The longer mean value length — News headlines, 25-entry MD increments — gives the bulk SOH pass longer runs of pure SIMD work per `_mm256_loadu_si256`, and pushes more of the scanner's work into the branchless straight-line path. L1-D misses per message climb slightly (0.11 → 0.61 for scalar; 0.35 → 0.61 for AVX2) but remain noise-level.
+
+QuickFIX's `StreamSplit` path scales catastrophically past L2: `FIX::Parser::readFixMessage` appears to memmove the remaining stream buffer on every dequeue, giving O(N²) in total stream size. At 5.77 MB that collapses to ~2.5 MiB/s (vs 146 MiB/s on the 150 KiB corpus) — the headline `960×-faster-than-QuickFIX` ratio on this corpus is driven by QuickFIX's scaling issue, not by further SwiftFIX wins. Use the 1190-msg corpus when comparing raw per-message scanner cost apples-to-apples with QuickFIX.
+
+---
+
 ## 2026-04-19 — 64-byte unroll in `find_soh_avx2` (regression, reverted)
 
 Tried two 32-byte loads + cmpeq per loop iter, OR'd into a 64-bit mask, with a 32-byte tail. **Regressed +17%** on this corpus and was reverted.

@@ -36,6 +36,18 @@ Per-message (per-iteration counts ÷ 1190). Re-run with `--benchmark_perf_counte
 
 Both SwiftFIX splitters are more computationally intensive than QuickFIX but finish in a fraction of the cycles, as they are compute-bound on hot L1 data. QuickFIX is memory-bound: ~900 L1 refills per message (per-frame `std::string` allocations, `FIX::Parser` buffer state, virtual dispatch) × ~12-cycle L2 latency ≈ the entire cycle gap. LLC is cold for all three — `bulk.stream` (~150 KiB) fits in L2. AVX2 narrows the SwiftFIX work further: -10% instructions and -27% cycles vs scalar, almost entirely from the bulk 32-byte SOH pass replacing the per-field byte-by-byte loop and pushing IPC close to 5.
 
+### Larger, higher-variance corpus
+
+Same build, on `corpus/bulk25k.stream` (25,000 messages, ~5.77 MB — exceeds L2). Adds News (`35=B`) with long free-text and deeper Market-Data Incremental (`35=X`) bursts, so mean value length is larger.
+
+| Benchmark              | Per msg  | Throughput   | AVX2 vs Scalar | AVX2 vs QF |
+|------------------------|----------|--------------|----------------|------------|
+| `QuickFIX_StreamSplit` | 91.0 µs  | 2.42 MiB/s   | —              | —          |
+| `SwiftFIX_ScalarSplit` | 135.6 ns | 1.59 GiB/s   | —              | —          |
+| `SwiftFIX_Avx2Split`   | 93.4 ns  | 2.31 GiB/s   | **-31%** time  | **975×**   |
+
+AVX2's margin over scalar widens from -10% on the small corpus to -31% here — longer values give the bulk SOH pass more runway per SIMD load. The `975× vs QuickFIX` ratio is inflated by scaling: `FIX::Parser::readFixMessage` memmoves the remaining buffer on every dequeue, making its splitter effectively O(N²) in stream size. Use the 1190-message corpus above for an apples-to-apples per-message comparison with QuickFIX.
+
 ## Repository layout
 
 ```

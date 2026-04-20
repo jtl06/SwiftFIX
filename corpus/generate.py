@@ -136,10 +136,26 @@ SYMBOLS = [
     "JPM", "V", "WMT", "UNH", "JNJ", "MA", "PG", "HD", "BAC", "AVGO",
     "LLY", "ABBV", "CVX", "XOM", "KO", "MRK", "PEP", "IBM", "ORCL",
     "CRM", "ADBE", "NFLX", "SPY", "QQQ", "IWM",
+    "DIS", "NKE", "MCD", "SBUX", "CSCO", "INTC", "AMD", "QCOM", "TXN",
+    "MU", "AMAT", "LRCX", "KLAC", "PYPL", "SQ", "SHOP", "UBER", "LYFT",
+    "ABNB", "DASH", "COIN", "MSTR", "PLTR", "SNOW", "DDOG", "CRWD",
+    "ZS", "OKTA", "NET", "MDB", "TEAM", "WDAY", "NOW",
 ]
 
-SENDERS = ["SENDER", "BUYSIDE1", "BUYSIDE2", "HFT01", "ALGO_A"]
-TARGETS = ["TARGET", "BROKER_X", "ECN_Y", "EXCH_Z"]
+SENDERS = ["SENDER", "BUYSIDE1", "BUYSIDE2", "HFT01", "ALGO_A",
+           "PRIME01", "DMA_DESK", "INST_FLOW", "RETAIL_AGG"]
+TARGETS = ["TARGET", "BROKER_X", "ECN_Y", "EXCH_Z",
+           "DARK_POOL_A", "LIT_VENUE_B", "MM_QUOTE_C"]
+
+# Word pool for variable-length free-text fields. Keeps the generator
+# deterministic while producing realistic-looking headlines / reasons.
+TEXT_WORDS = [
+    "order", "filled", "partial", "reject", "price", "limit", "market",
+    "side", "buy", "sell", "quote", "spread", "depth", "book", "halt",
+    "resume", "auction", "close", "open", "session", "venue", "route",
+    "reroute", "latency", "timeout", "retry", "amend", "cancel", "replace",
+    "allocation", "account", "fill", "liquidity", "maker", "taker",
+]
 
 
 class BulkGenerator:
@@ -147,16 +163,18 @@ class BulkGenerator:
     # random.choices, but keeping them as fractions-summing-to-1 makes
     # the distribution readable at a glance.
     BUILDERS: list[tuple[str, float]] = [
-        ("execution_report",            0.35),
-        ("new_order_single",            0.20),
+        ("execution_report",            0.32),
+        ("new_order_single",            0.18),
         ("market_data_snapshot",        0.10),
         ("new_order_single_with_allocs", 0.05),
-        ("heartbeat",                   0.12),
-        ("test_request",                0.05),
+        ("heartbeat",                   0.10),
+        ("test_request",                0.04),
         ("order_cancel_request",        0.05),
-        ("logon",                       0.03),
-        ("logout",                      0.03),
+        ("logon",                       0.02),
+        ("logout",                      0.02),
         ("resend_request",              0.02),
+        ("news",                        0.08),
+        ("market_data_incremental",     0.02),
     ]
 
     def __init__(self, seed: int) -> None:
@@ -195,6 +213,10 @@ class BulkGenerator:
 
     def _symbol(self) -> str:
         return self.r.choice(SYMBOLS)
+
+    def _text(self, min_words: int, max_words: int) -> str:
+        n = self.r.randint(min_words, max_words)
+        return " ".join(self.r.choice(TEXT_WORDS) for _ in range(n))
 
     def _header(self, msg_type: str) -> list[tuple[int, str]]:
         return [
@@ -302,6 +324,11 @@ class BulkGenerator:
             ]
         else:
             fields += [(151, str(qty)), (14, "0"), (6, "0")]
+        # ~15% of execution reports carry a free-text note (Text, tag 58).
+        # Short-to-medium length — pushes value-side SOH distance past the
+        # typical 8-20 bytes into the AVX2 sweet spot.
+        if self.r.random() < 0.15:
+            fields.append((58, self._text(4, 14)))
         return fields
 
     def order_cancel_request(self) -> list[tuple[int, str]]:
@@ -327,6 +354,36 @@ class BulkGenerator:
                 (270, self._price()),               # MDEntryPx
                 (271, str(self._qty())),            # MDEntrySize
             ]
+        return fields
+
+    def market_data_incremental(self) -> list[tuple[int, str]]:
+        # Deeper-book bursts: up to 25 entries per message. Pushes the
+        # per-message body well past a single 32-byte SIMD window.
+        n = self.r.randint(8, 25)
+        fields = self._header("X") + [(268, str(n))]
+        for _ in range(n):
+            fields += [
+                (279, self.r.choice(["0", "1", "2"])),  # MDUpdateAction
+                (269, self.r.choice(["0", "1"])),
+                (55, self._symbol()),
+                (270, self._price()),
+                (271, str(self._qty())),
+            ]
+        return fields
+
+    def news(self) -> list[tuple[int, str]]:
+        # News messages (35=B) carry long free-text fields — Headline (148),
+        # Subject (147), and a LinesOfText group (tag 33 / tag 58 per line).
+        # Value lengths here routinely span 50-300 bytes, which is the
+        # regime where the AVX2 bulk SOH pass dominates scalar.
+        n_lines = self.r.randint(1, 6)
+        fields = self._header("B") + [
+            (148, self._text(4, 16)),                 # Headline
+            (147, self._text(8, 24)),                 # Subject
+            (33, str(n_lines)),                       # LinesOfText count
+        ]
+        for _ in range(n_lines):
+            fields.append((58, self._text(6, 40)))    # Text
         return fields
 
     # ---- mixer -----------------------------------------------------------
