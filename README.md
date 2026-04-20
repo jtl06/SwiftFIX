@@ -20,7 +20,9 @@ For a quick technical review, read these files in order:
 3. `preparser/src/scanner_avx2.cpp` shows the SIMD path: one bulk `<SOH>` scan, then scalar tag parsing between known boundaries.
 4. `preparser/src/dispatch.cpp` shows runtime AVX2 selection with scalar fallback.
 
-The other folders support that core: `bench/` measures it, `corpus/` feeds it reproducible FIX data, and `integration/` connects it to QuickFIX.
+The scalar and AVX2 scanner implementations were written directly as the core systems work. AI coding tools such as Codex and Claude Code were used to accelerate integration, test coverage, review, and documentation cleanup.
+
+The other folders support that core: `bench/` measures it, `corpus/` feeds it reproducible FIX data, and `integration/` connects it to QuickFIX. `bench/PERFLOG.md` records performance-sensitive changes and benchmark deltas to help catch regressions.
 
 ## Why It Is Faster
 
@@ -112,6 +114,10 @@ SWIFTFIX_CORPUS=corpus/bulk.stream scripts/bench.sh \
 - `integration/`: QuickFIX patch, shim, and end-to-end integration test.
 - `bench/`: benchmark harness and recorded benchmark outputs.
 - `corpus/`: synthetic valid, malformed, and bulk FIX inputs.
+
+## Influences
+
+SwiftFIX was influenced by [simdjson](https://simdjson.org/)'s staged structural scanning model and the branch-conscious parsing techniques discussed on [branchfree.org](https://branchfree.org/).
 
 ## License
 
