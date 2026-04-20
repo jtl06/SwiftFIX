@@ -161,6 +161,26 @@ FIX checksum is exactly 3 ASCII digits. Replaced the `parse_uint` call (loop, ov
 
 ---
 
+## 2026-04-19 — whole-message SOH indexing
+
+Replaced the per-field `scan_one_field` (which did its own AVX2 SOH scan for each field's value) with a two-pass shape: one bulk AVX2 pass over `[post-tag-35-SOH, body_end+7)` collects every SOH offset into a stack `std::uint32_t sohs[kMaxFields]`, then a scalar second pass walks the array and parses tag digits between consecutive known boundaries. Checksum field (`"10=NNN<SOH>"`) is validated directly from the last SOH. Dead helpers (`find_soh_avx2`, `scan_one_field`) removed.
+
+| Metric            | AVX2 (per-field) | AVX2 (bulk SOH) | Δ       |
+|-------------------|------------------|-----------------|---------|
+| p50 time          | 75.9 µs          | 68.0 µs         | -10%    |
+| Per msg           | 63.8 ns          | 57.1 ns         | -10%    |
+| Throughput        | 1.906 GiB/s      | 2.19 GiB/s      | +15%    |
+| Msg/s             | 13.20 M          | 14.72 M         | +12%    |
+| Instructions/msg  | 1,110            | 1,253           | +13%    |
+| Cycles/msg        | 285              | 257             | -10%    |
+| Branches/msg      | 229              | 271             | +18%    |
+| L1-D misses/msg   | 0.26             | 0.35            | +0.09   |
+| IPC               | 3.90             | 4.88            | +25%    |
+
+More total instructions (bulk SIMD pass scans body bytes, scalar pass still walks tag bytes) but fewer cycles — the SIMD pass is branchless and runs near-peak, and the scalar pass gets a known end pointer per field so its tag-digit loop drops the `p < end` bounds check against the buffer end in favor of a simple `tp < se` against the next SOH. The per-field path paid AVX2 setup (broadcast, loadu, cmpeq, movemask) once per value; the bulk path amortizes setup across one pass covering all fields, and the inner SOH-extract loop (`countr_zero` + `m &= m - 1`) runs at very high IPC. Instructions budget shifts from branchy scalar to straight-line SIMD.
+
+---
+
 ## 2026-04-19 — 64-byte unroll in `find_soh_avx2` (regression, reverted)
 
 Tried two 32-byte loads + cmpeq per loop iter, OR'd into a 64-bit mask, with a 32-byte tail. **Regressed +17%** on this corpus and was reverted.
