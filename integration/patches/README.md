@@ -1,18 +1,13 @@
 # QuickFIX patches
 
-Minimal, numbered patch series applied to the pinned QuickFIX submodule
-(`third_party/quickfix`, tag `v1.15.1`) so it can consume a pre-computed
+Minimal patch series applied to the pinned QuickFIX submodule
+(`third_party/quickfix`, tag `v1.15.1`) so it can consume a precomputed
 `swiftfix::FieldIndex` instead of rescanning a message from byte zero.
 
-**Phase 0: this directory is intentionally empty.** Profiling has to confirm
-the scan path is actually hot before we cut into QuickFIX.
-
-## Intended layout
+## Current patches
 
 ```
 0001-expose-parse-from-field-index.patch
-0002-add-message-parse-hook.patch
-0003-bypass-rescan-when-index-present.patch
 ```
 
 ## Rules for this patch series
@@ -31,7 +26,8 @@ the scan path is actually hot before we cut into QuickFIX.
 
 ## Applying / rebasing
 
-Patches apply from the SwiftFIX repo root:
+Patches are applied automatically by CMake through `apply.sh`. To apply or
+check them manually from the SwiftFIX repo root:
 
 ```
 cd third_party/quickfix

@@ -1,8 +1,7 @@
 // field_index.hpp — data structure handed from the pre-parser to QuickFIX.
 //
-// The full binary layout, size-class policy, and lifetime rules are described
-// in docs/field_index_format.md. This header declares the types; bodies are
-// implemented in the scanner translation units.
+// This header defines the scanner output layout. Scanner implementations fill
+// these offsets; the QuickFIX shim consumes them without copying field values.
 #pragma once
 
 #include <array>
@@ -15,7 +14,7 @@ namespace swiftfix {
 // a field entry into 16 bytes and caps single-message size at 4 GiB — well
 // beyond anything a real session will produce. The '=' byte is not stored
 // because the consumer only needs [value_start, value_end) to copy the value
-// and tag_number to dispatch; see docs/field_index_format.md.
+// and tag_number to dispatch.
 struct FieldEntry {
     std::uint32_t tag_start;     // offset of the first tag-digit byte
     std::uint32_t value_start;   // offset of the first value byte (byte after '=')

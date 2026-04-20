@@ -1,6 +1,5 @@
 # bench/ — Google Benchmark harness for replaying FIX bytes through
-# stock QuickFIX (no pre-parser). Phase 0 produces the baseline numbers
-# every future optimization is measured against.
+# stock QuickFIX and SwiftFIX scanner implementations.
 
 include(FetchContent)
 

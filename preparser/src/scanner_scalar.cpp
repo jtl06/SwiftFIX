@@ -1,6 +1,4 @@
 // scanner_scalar.cpp — reference scalar implementation.
-//
-// Scalar implementation completed.
 #include "swiftfix/scanner.hpp"
 
 namespace swiftfix {
@@ -37,6 +35,7 @@ class ScalarScanner final : public Scanner {
         p++;  // past SOH
 
         // tag 9
+        if (end - p < 2) [[unlikely]] return ScanStatus::Truncated;
         if (p[0] != '9' || p[1] != '=') [[unlikely]] return ScanStatus::BadHeader;
         const unsigned char* const t9_start = p;
         p += 2;
@@ -62,10 +61,13 @@ class ScalarScanner final : public Scanner {
 
         // body bounds check
         const std::size_t body_start = static_cast<std::size_t>(p - base);
-        const std::size_t body_end   = body_start + body_len;
-        if (body_end + 7 > buffer.size()) [[unlikely]] return ScanStatus::Truncated;
+        const std::size_t remaining = buffer.size() - body_start;
+        if (body_len > remaining) [[unlikely]] return ScanStatus::Truncated;
+        const std::size_t body_end = body_start + body_len;
+        if (remaining - body_len < 7) [[unlikely]] return ScanStatus::Truncated;
 
         // tag 35
+        if (end - p < 3) [[unlikely]] return ScanStatus::Truncated;
         if (p[0] != '3' || p[1] != '5' || p[2] != '=') [[unlikely]] return ScanStatus::BadHeader;
         const unsigned char* const t35_start = p;
         p += 3;
@@ -96,7 +98,6 @@ class ScalarScanner final : public Scanner {
                 return ScanStatus::FallbackRequested;
             out.fields[out.field_count++] = entry;
         }
-        // check overshoot
         if (p != body_end_ptr) [[unlikely]] return ScanStatus::BadBodyLength;
 
         // check ending and checksum
@@ -105,7 +106,6 @@ class ScalarScanner final : public Scanner {
             [[unlikely]] case FieldScan::Truncated: return ScanStatus::Truncated;
             [[unlikely]] case FieldScan::Malformed: return ScanStatus::Malformed;
         }
-        //check if 10
         if (entry.tag_number != 10) [[unlikely]] return ScanStatus::BadBodyLength;
         if (entry.value_end - entry.value_start != 3) [[unlikely]] return ScanStatus::Malformed;
         // FIX checksum is exactly 3 ASCII digits; value math handled by quickfix.
@@ -115,7 +115,7 @@ class ScalarScanner final : public Scanner {
             ((v[2] - '0') > 9u)) [[unlikely]]
             return ScanStatus::Malformed;
 
-        //set fast access slot
+        if (out.field_count >= kMaxFields) [[unlikely]] return ScanStatus::TableFull;
         out.checksum_idx = static_cast<std::int32_t>(out.field_count);
         out.fields[out.field_count++] = entry;
         out.frame_length = static_cast<std::uint32_t>(p - base);
@@ -141,6 +141,8 @@ class ScalarScanner final : public Scanner {
         while (p < end) {
             const unsigned c = *p;
             if (is_digit(c)) {
+                if (tag > (UINT32_MAX - 9) / 10) [[unlikely]]
+                    return FieldScan::Malformed;
                 tag = tag * 10 + (c - '0');
                 p++;
             } else if (c == '=') {
@@ -171,7 +173,6 @@ class ScalarScanner final : public Scanner {
         return FieldScan::Ok;
     }
 
-    //returns digit if between 0 and 9
     static constexpr bool is_digit(unsigned c) noexcept { return (c - '0') <= 9u; }
 };
 

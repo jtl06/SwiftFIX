@@ -1,7 +1,7 @@
 // status.hpp — outcome codes for the pre-parser scan path.
 //
 // The pre-parser is *advisory*. On any non-OK status the caller is expected
-// to fall back to stock QuickFIX message parsing; see docs/fallback_policy.md.
+// to fall back to stock QuickFIX message parsing.
 #pragma once
 
 #include <cstdint>
@@ -37,14 +37,9 @@ enum class ScanStatus : std::uint8_t {
     BadBodyLength,
 
     // Scanner policy chose not to emit an index for this frame. This is NOT
-    // a verdict on the frame's validity — the frame may be well-formed FIX
-    // that the scanner (scalar or SIMD) declines to process in the current
-    // phase. Example: scalar phase 1 returns FallbackRequested when it
-    // encounters a length-prefixed embedded-data tag (95/96) rather than
-    // hardcoding skip logic for every variant; a future SIMD path may
-    // return it for constructs its kernel cannot handle. The status is
-    // shared across scanner kinds — what triggers it differs per kind.
-    // See docs/fallback_policy.md and docs/embedded_data.md.
+    // a verdict on the frame's validity. For example, scanners return this
+    // for length-prefixed embedded-data tags (95/96), whose values may
+    // contain delimiter-looking bytes that require stock QuickFIX parsing.
     FallbackRequested,
 
     // The frame exceeded the inline field-table capacity (kMaxFields) before

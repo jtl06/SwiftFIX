@@ -10,7 +10,7 @@ Adds an additive fast-path entry point:
 
 setFromPreScan mirrors setString's semantics (same isHeaderField /
 isTrailerField partitioning, same appendField + sortFields tail, same
-optional DataDictionary parameter carried through unused in phase 1)
+optional DataDictionary parameter carried through unused by this hook)
 but consumes already-extracted field boundaries instead of rescanning
 the wire bytes. It eliminates the per-field std::find / IntConvertor
 overhead in Message::extractField on the receive path.
@@ -23,10 +23,9 @@ and Message.cpp (the implementation). With the macro undefined the
 patch contributes zero bytes to the compiled library; the unmodified
 QuickFIX test suite passes bit-for-bit.
 
-Scope (phase 1):
+Scope:
   - No repeating-group expansion. Callers route group-bearing messages
-    to the legacy setString path. swiftfix's scanner signals this via
-    ScanStatus::FallbackRequested.
+    to the legacy setString path before calling setFromPreScan.
   - Validation is opt-in via the doValidation parameter and defaults
     to false (matches how the swiftfix shim consumes it; the fallback
     path remains authoritative for validation).
@@ -42,22 +41,9 @@ already has, cutting the duplicate scan. The dominant remaining cost
 (std::string allocation inside FieldBase::m_string) is out of scope
 for this patch and is the target of the follow-up FieldBase rework.
 
-Build-system wiring (follow-up, not part of this patch):
-
-  1. The top-level CMakeLists.txt ExternalProject_Add(quickfix_external)
-     needs a PATCH_COMMAND that applies every file under
-     integration/patches/*.patch to ${QUICKFIX_SRC_DIR}, or the patches
-     never take effect. Today the block has UPDATE_DISCONNECTED 1 and no
-     patch step.
-  2. That same block needs to pass -DSWIFTFIX_ENABLE_PREPARSE into the
-     QuickFIX sub-build's compile flags (e.g. via CMAKE_CXX_FLAGS_INIT or
-     a QuickFIX-visible CMake option). Without it, the #ifdef gates
-     compile out and this patch contributes zero symbols — which is the
-     correct stock behavior, but also not what we want in the swiftfix
-     build.
-
-Both are small, orthogonal CMake edits tracked separately. Patch 0001
-itself is pure source changes to the QuickFIX tree.
+SwiftFIX's top-level CMake applies this patch during the QuickFIX
+ExternalProject build and defines SWIFTFIX_ENABLE_PREPARSE for the
+sub-build.
 ---
  src/C++/Field.h     | 30 +++++++++++++++++++++++
  src/C++/Message.cpp | 66 +++++++++++++++++++++++++++++++++++++++++++++++++
@@ -177,7 +163,7 @@ index c8303111..bcf96058 100644
 +  sortFields();
 +  m_trailer.sortFields();
 +
-+  // Phase 1: no repeating-group expansion. pApplicationDataDictionary
++  // No repeating-group expansion. pApplicationDataDictionary
 +  // is accepted so the signature parallels setString but is not
 +  // consulted — caller routes group-bearing messages to setString.
 +
@@ -235,9 +221,8 @@ index 7abe9c43..c2490762 100644
 +  /// indistinguishable from one built via setString(validate=false) as
 +  /// long as `fields` describes a valid FIX frame in wire order.
 +  ///
-+  /// Not safe for messages containing repeating groups in phase 1 —
-+  /// caller must route those to setString (the swiftfix scanner signals
-+  /// this via ScanStatus::FallbackRequested).
++  /// Not safe for messages containing repeating groups — caller must
++  /// route those to setString before calling this method.
 +  void setFromPreScan( const PreScanField* fields, std::size_t n,
 +                       bool doValidation = false,
 +                       const FIX::DataDictionary* pSessionDataDictionary = 0,

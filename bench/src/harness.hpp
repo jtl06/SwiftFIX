@@ -1,9 +1,7 @@
 // harness.hpp — benchmark entry points.
 //
-// The phase-0 harness pushes corpus bytes through FIX::Message::setString
-// with validation off, which approximates the hot path QuickFIX takes on
-// inbound session messages. Future benchmarks (phase 3+) will add
-// variants that route through the shim with preparse enabled.
+// Registers QuickFIX baselines and SwiftFIX scanner benchmarks. Corpus mode
+// determines whether benchmarks run over pre-split files or a raw stream.
 #pragma once
 
 namespace swiftfix::bench {

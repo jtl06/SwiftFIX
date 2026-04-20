@@ -1,8 +1,7 @@
 # Benchmarks
 
-Google Benchmark harness for replaying FIX bytes through stock QuickFIX.
-The numbers produced here are the baselines every phase-1+ optimization
-is measured against.
+Google Benchmark harness for comparing stock QuickFIX stream handling with
+SwiftFIX scanner implementations.
 
 ## Running
 
@@ -23,7 +22,7 @@ whichever benchmarks make sense:
 | `SWIFTFIX_CORPUS` points at | Registered benchmark(s)                   |
 |-----------------------------|-------------------------------------------|
 | directory (default: `corpus/valid/`) | `QuickFIX_SetString`             |
-| file (e.g. `corpus/bulk.stream`)     | `QuickFIX_StreamSplit` + `QuickFIX_StreamParse` |
+| file (e.g. `corpus/bulk.stream`)     | `QuickFIX_StreamSplit`, `QuickFIX_StreamParse`, `SwiftFIX_ScalarSplit`, and `SwiftFIX_Avx2Split` when AVX2 is available |
 
 - **QuickFIX_SetString** — pre-split frames fed into
   `FIX::Message::setString(validate=false)`. Measures tag parsing in
@@ -35,6 +34,9 @@ whichever benchmarks make sense:
 - **QuickFIX_StreamParse** — raw byte stream in, full `FIX::Message`
   objects out. This is the stock on-the-wire path and the apples-to-
   apples counterpart for a pre-parser that drives the shim end-to-end.
+- **SwiftFIX_ScalarSplit / SwiftFIX_Avx2Split** — raw byte stream scanned
+  frame-by-frame, advancing by `FieldIndex::frame_length`. Measures scanner
+  throughput without constructing `FIX::Message` objects.
 
 ## Machine-independent signals (perf counters)
 

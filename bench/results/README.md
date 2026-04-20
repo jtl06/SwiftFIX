@@ -10,5 +10,5 @@ YYYY-MM-DD-<short-git-sha>-<machine>.json
 ```
 
 Google Benchmark's native `--benchmark_out_format=json` output. Keep the
-files as-produced — downstream tooling (not yet written) may aggregate them
-across runs.
+files as-produced so they can be compared with `git diff`, `jq`, or
+Google Benchmark's comparison tools.

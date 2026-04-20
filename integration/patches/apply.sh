@@ -36,6 +36,11 @@ for patch in "${patches[@]}"; do
         echo "apply.sh: ${name} already applied — skipping"
         continue
     fi
+    if [[ "${name}" == "0001-expose-parse-from-field-index.patch" ]] &&
+       git grep -q "setFromPreScan" -- src/C++/Message.h; then
+        echo "apply.sh: ${name} already applied — skipping"
+        continue
+    fi
     if ! git apply --check "${patch}" >/dev/null 2>&1; then
         echo "apply.sh: ${name} does not apply cleanly (not already applied, not appliable)" >&2
         git apply --check "${patch}" || true

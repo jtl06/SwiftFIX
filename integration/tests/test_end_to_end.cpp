@@ -1,4 +1,4 @@
-// test_end_to_end.cpp — Phase 1 smoke tests for the shim.
+// test_end_to_end.cpp — shim behavior against patched QuickFIX.
 //
 // Verifies: with preparse disabled (the default) a SessionShim parses a
 // valid FIX frame via stock QuickFIX, and the stats counters move in the
@@ -33,6 +33,31 @@ constexpr const char kLogon[] =
     "98=0\x01"
     "108=30\x01"
     "10=103\x01";
+
+constexpr const char kGroupBearingOrder[] =
+    "8=FIX.4.4\x01"
+    "9=182\x01"
+    "35=D\x01"
+    "49=HFT01\x01"
+    "56=EXCH_Z\x01"
+    "34=10\x01"
+    "52=20260101-00:00:00.100\x01"
+    "11=CLR56FAO72KZ\x01"
+    "21=1\x01"
+    "55=QQQ\x01"
+    "54=1\x01"
+    "60=20260101-00:00:00.100\x01"
+    "38=50\x01"
+    "40=1\x01"
+    "59=0\x01"
+    "78=3\x01"
+    "79=ACCT00\x01"
+    "80=16\x01"
+    "79=ACCT01\x01"
+    "80=16\x01"
+    "79=ACCT02\x01"
+    "80=18\x01"
+    "10=085\x01";
 
 std::span<const std::byte> as_bytes(const char* s, std::size_t n) {
     return {reinterpret_cast<const std::byte*>(s), n};
@@ -84,6 +109,23 @@ TEST(Shim, EnablingPreparseTakesFastPath) {
     EXPECT_EQ(shim.stats().preparse_attempted, 1u);
     EXPECT_EQ(shim.stats().preparse_succeeded, 1u);
     EXPECT_EQ(shim.stats().fallback_used, 0u);
+    EXPECT_EQ(shim.stats().parse_failed, 0u);
+
+    swiftfix::shim::set_preparse_enabled(false);
+}
+
+TEST(Shim, GroupBearingFramesFallbackToStockParser) {
+    swiftfix::shim::set_preparse_enabled(true);
+    swiftfix::shim::SessionShim shim;
+
+    FIX::Message msg;
+    const bool ok = shim.parse_into(
+        as_bytes(kGroupBearingOrder, sizeof(kGroupBearingOrder) - 1), msg);
+
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(shim.stats().preparse_attempted, 1u);
+    EXPECT_EQ(shim.stats().preparse_succeeded, 0u);
+    EXPECT_EQ(shim.stats().fallback_used, 1u);
     EXPECT_EQ(shim.stats().parse_failed, 0u);
 
     swiftfix::shim::set_preparse_enabled(false);

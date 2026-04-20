@@ -32,8 +32,8 @@ dev-x86-64-icelake-linux6.5-Release.txt
 ## Regenerating
 
 ```
-scripts/bench.sh --baseline --output bench/baseline/my-host.txt
+scripts/bench.sh
 ```
 
-(The `--baseline` flag will be added when the bench harness matures past
-phase 0; for now, `scripts/bench.sh` just emits to `bench/results/`.)
+Copy the relevant JSON from `bench/results/` into a named baseline file only
+when you want to pin a machine-specific reference point.

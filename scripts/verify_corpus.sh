@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # verify_corpus.sh — scalar-vs-SIMD equivalence check.
 #
-# TODO(phase2): replay every corpus file through both the scalar scanner
-# and every SIMD scanner compiled into the build, and diff the resulting
-# FieldIndex structures byte-for-byte. A divergence is a hard failure.
-#
-# Intentionally empty in phase 0 — the scalar scanner is still a stub and
-# no SIMD scanner has been implemented yet.
+# Builds the release tree if needed, then runs the corpus scanner tests.
 set -euo pipefail
 
-echo "verify_corpus.sh is a phase-2 placeholder; nothing to verify yet." >&2
-exit 0
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="${REPO_ROOT}/build/release"
+
+if [[ ! -x "${BUILD_DIR}/preparser/tests/swiftfix_unit_tests" ]]; then
+    "${REPO_ROOT}/scripts/build.sh"
+fi
+
+cd "${BUILD_DIR}"
+ctest --output-on-failure -R ScannerCorpus

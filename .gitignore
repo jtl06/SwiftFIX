@@ -28,9 +28,6 @@ _deps/
 perf.data
 perf.data.old
 *.svg
-profile/flamegraphs/*.svg
-profile/flamegraphs/*.folded
-profile/flamegraphs/*.stacks
 
 # Bench results are committed (see bench/results/), but intermediate files are not
 bench/results/*.tmp

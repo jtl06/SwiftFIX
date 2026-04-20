@@ -1,7 +1,7 @@
 # Test corpus
 
-Raw FIX messages used by tests, benchmarks, and the scalar-vs-SIMD
-equivalence check (once that lands in phase 2).
+Raw FIX messages used by tests, benchmarks, and scalar-vs-SIMD equivalence
+checks.
 
 ## On-disk formats
 
@@ -31,8 +31,7 @@ is acceptable.
 | `bad_checksum/`       | Header looks fine, tag 10 (CheckSum) is wrong         |
 | `bad_bodylength/`     | Tag 9 value disagrees with actual body byte count     |
 | `repeated_tags/`      | Same tag present multiple times (valid for groups)    |
-| `rawdata/`            | Embedded-binary edge cases (tag 95/96). See           |
-|                       | `docs/embedded_data.md`                               |
+| `rawdata/`            | Embedded-binary edge cases (tag 95/96)                |
 | `bulk.stream` *(file)*| Concatenated procedurally-generated frames for bench  |
 | `bulk25k.stream` *(file)*| 25k-message higher-variance stream (~5.77 MB, exceeds L2) |
 

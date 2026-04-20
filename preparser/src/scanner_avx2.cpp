@@ -45,6 +45,7 @@ class Avx2Scanner final : public Scanner {
         ++p;  // past SOH
 
         // tag 9
+        if (end - p < 2) [[unlikely]] return ScanStatus::Truncated;
         if (p[0] != '9' || p[1] != '=') [[unlikely]] return ScanStatus::BadHeader;
         const unsigned char* const t9_start = p;
         p += 2;
@@ -70,10 +71,13 @@ class Avx2Scanner final : public Scanner {
 
         // body bounds check
         const std::size_t body_start = static_cast<std::size_t>(p - base);
-        const std::size_t body_end   = body_start + body_len;
-        if (body_end + 7 > buffer.size()) [[unlikely]] return ScanStatus::Truncated;
+        const std::size_t remaining = buffer.size() - body_start;
+        if (body_len > remaining) [[unlikely]] return ScanStatus::Truncated;
+        const std::size_t body_end = body_start + body_len;
+        if (remaining - body_len < 7) [[unlikely]] return ScanStatus::Truncated;
 
         // tag 35
+        if (end - p < 3) [[unlikely]] return ScanStatus::Truncated;
         if (p[0] != '3' || p[1] != '5' || p[2] != '=') [[unlikely]] return ScanStatus::BadHeader;
         const unsigned char* const t35_start = p;
         p += 3;
@@ -135,6 +139,8 @@ class Avx2Scanner final : public Scanner {
             while (tp < se && *tp != '=') {
                 const unsigned c = *tp;
                 if (!is_digit(c)) [[unlikely]] return ScanStatus::Malformed;
+                if (tag > (UINT32_MAX - 9) / 10) [[unlikely]]
+                    return ScanStatus::Malformed;
                 tag = tag * 10 + (c - '0');
                 ++tp;
             }

@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build/release"
 BENCH_BIN="${BUILD_DIR}/bench/swiftfix_bench"
 CORPUS_DIR="${REPO_ROOT}/corpus/valid"
-OUT_DIR="${REPO_ROOT}/profile/flamegraphs"
+OUT_DIR="${REPO_ROOT}/build/profile/flamegraphs"
 
 missing=0
 

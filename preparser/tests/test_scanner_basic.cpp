@@ -1,9 +1,7 @@
-// test_scanner_basic.cpp — Phase 1 smoke test.
+// test_scanner_basic.cpp — scanner dispatch and status smoke tests.
 //
 // Confirms that the preparser headers compile, symbols link, and the
-// dispatcher returns a non-null scalar scanner. Deeper parsing coverage
-// (header stages, body loop, checksum, fallback cases) lives in
-// test_scanner_scalar.cpp when that file lands.
+// dispatcher returns a usable scalar or AVX2 scanner.
 #include <cstddef>
 #include <span>
 
@@ -47,6 +45,17 @@ TEST(ScannerBasic, EmptyBufferIsTruncated) {
     swiftfix::FieldIndex idx;
     std::byte buf[1]{};
     auto status = s.scan(std::span<const std::byte>(buf, 0), idx);
+    EXPECT_EQ(status, swiftfix::ScanStatus::Truncated);
+}
+
+TEST(ScannerBasic, TruncatedAfterBeginStringIsTruncated) {
+    const char raw[] = "8=FIX.4.4EXTRA\x01";
+    auto& s = swiftfix::default_scanner();
+    swiftfix::FieldIndex idx;
+    const auto status = s.scan(
+        std::span<const std::byte>(
+            reinterpret_cast<const std::byte*>(raw), sizeof(raw) - 1),
+        idx);
     EXPECT_EQ(status, swiftfix::ScanStatus::Truncated);
 }
 

@@ -1,6 +1,6 @@
 // quickfix_shim.hpp — public API for feeding a pre-scanned FieldIndex into
 // QuickFIX. The shim is behind a feature flag; by default every call falls
-// through to stock QuickFIX parsing (see docs/fallback_policy.md).
+// through to stock QuickFIX parsing.
 #pragma once
 
 #include <array>
@@ -22,9 +22,8 @@ namespace swiftfix::shim {
 void set_preparse_enabled(bool on) noexcept;
 bool preparse_enabled() noexcept;
 
-// Per-session state. Holds the reusable FieldIndex so scan() runs
-// zero-alloc in steady state — see docs/field_index_format.md
-// (Lifetime & ownership) for the rationale.
+// Per-session state. Holds the reusable FieldIndex so scan() runs zero-alloc
+// in steady state.
 //
 // Not thread-safe. QuickFIX's Session model already gives each session a
 // single-threaded reader; instantiate one SessionShim per Session. Tests

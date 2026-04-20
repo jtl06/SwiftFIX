@@ -1,106 +1,118 @@
 # SwiftFIX
 
-Faster, SIMD-assisted FIX pre-parser for [QuickFIX C++](https://github.com/quickfix/quickfix).
+SIMD-assisted FIX pre-parser for [QuickFIX C++](https://github.com/quickfix/quickfix), built to reduce the cost of splitting inbound FIX tag-value streams before handing messages to QuickFIX for validation, session state, and semantics.
 
-> Status: Scalar and AVX2 preparsers implemented and benchmarked. AVX-512 / NEON to follow.
+SwiftFIX scans raw FIX bytes for `<SOH>` and `=` boundaries, validates the fixed header, and writes compact field offsets into a reused output buffer. The project includes:
 
-SwiftFIX performs structural scanning of inbound FIX tag-value messages by finding `<SOH>` and `=` boundaries, extracting header tag positions, and doing early malformed-frame rejection. It hands QuickFIX a pre-computed field-boundary table.
+- A scalar scanner with early malformed-frame rejection.
+- An AVX2 scanner with runtime CPU dispatch and scalar fallback.
+- A small QuickFIX patch/shim path that lets QuickFIX consume the precomputed field index instead of rescanning from byte zero.
+- A reproducible benchmark corpus and Google Benchmark harness.
 
-The SwiftFIX project composes of a hand-written scalar preparser and an AVX2 preparser (TODO: AVX-512 / NEON). SwiftFIX represents a 15× improvement to throughput vs stock QuickFIX `StreamSplit` by replacing its allocation-and-copy frame extraction (a fresh std::string per message, a memmove of the read buffer on every call) with a single linear pass that writes fixed-size offset records into a reused output buffer. This eliminates ~900 L1 cache-line refills per message and lets the CPU pipeline run at ~4 IPC instead of stalling at 0.18. The AVX2 path does one bulk 32-byte `_mm256_cmpeq_epi8` pass over the whole body to collect every SOH offset, then a scalar pass parses fields between known boundaries — cutting another -32% cycles vs scalar and pushing IPC to 4.88.
+## Start Here
 
-QuickFIX remains the authoritative engine for validation, session state, and message semantics.
+The important code is in `preparser/`.
+
+For a quick technical review, read these files in order:
+
+1. `preparser/include/swiftfix/field_index.hpp` defines the offset table that replaces repeated string extraction.
+2. `preparser/src/scanner_scalar.cpp` shows the reference parser and the validation/fallback contract.
+3. `preparser/src/scanner_avx2.cpp` shows the SIMD path: one bulk `<SOH>` scan, then scalar tag parsing between known boundaries.
+4. `preparser/src/dispatch.cpp` shows runtime AVX2 selection with scalar fallback.
+
+The other folders support that core: `bench/` measures it, `corpus/` feeds it reproducible FIX data, and `integration/` connects it to QuickFIX.
+
+## Why It Is Faster
+
+QuickFIX's stock stream splitter repeatedly extracts frames through allocation-and-copy work: one `std::string` per message and a buffer `memmove` on each dequeue. SwiftFIX replaces that with a single linear pass over the stream and fixed-size offset records written into caller-owned storage.
+
+The AVX2 scanner uses 32-byte `_mm256_cmpeq_epi8` comparisons to collect `<SOH>` offsets across the message body, then parses tag digits between known boundaries. Short fixed-header fields stay scalar because SIMD setup cost is not worth it there.
 
 ## Results
 
-Phase 1 numbers on `corpus/bulk.stream` (1190 messages, Release build, i7-12650H, CPU scaling enabled — treat as rough):
+Release build on an i7-12650H, using `corpus/bulk.stream` with 1,190 synthetic FIX messages. CPU frequency scaling was enabled, so wall-clock numbers should be treated as local measurements; the relative counters are the more portable signal.
 
-| Benchmark              | p50 time | Per msg  | Throughput  | Msg/s   |
-|------------------------|----------|----------|-------------|---------|
-| `QuickFIX_StreamSplit` | 1.04 ms  | 874 ns   | 146 MiB/s   | 959 k   |
-| `SwiftFIX_ScalarSplit` | 93.2 µs  | 78.6 ns  | 1.60 GiB/s  | 10.75 M |
-| `SwiftFIX_Avx2Split`   | 68.0 µs  | 57.1 ns  | 2.19 GiB/s  | 14.72 M |
+| Benchmark              | p50 time | Per msg | Throughput | Msg/s   |
+|------------------------|----------|---------|------------|---------|
+| `QuickFIX_StreamSplit` | 1.04 ms  | 874 ns  | 146 MiB/s  | 959 k   |
+| `SwiftFIX_ScalarSplit` | 93.2 us  | 78.6 ns | 1.60 GiB/s | 10.75 M |
+| `SwiftFIX_Avx2Split`   | 68.0 us  | 57.1 ns | 2.19 GiB/s | 14.72 M |
 
-`ScalarSplit` and `Avx2Split` are SwiftFIX equivalents to `StreamSplit`, all producing frame boundaries for `StreamParse`. The AVX2 path makes a single 32-byte `_mm256_cmpeq_epi8` pass over the message body to collect every SOH offset into a stack array, then a scalar second pass parses tag digits between consecutive known boundaries. Fixed-header parsing (tags 8/9/35) stays scalar since those spans are too short for SIMD to pay off. Runtime dispatch via `__builtin_cpu_supports("avx2")` falls back to scalar on non-AVX2 hosts.
+On this corpus, AVX2 splitting is about **15x faster** than QuickFIX's stock splitter and uses about **27% fewer cycles** than the scalar SwiftFIX scanner.
 
-### Perf counters (libpfm4)
+### Hardware Counters
 
-Per-message (per-iteration counts ÷ 1190). Re-run with `--benchmark_perf_counters=...`.
+Per-message counters from libpfm4, computed as per-iteration counts divided by 1,190 messages:
 
-| Metric            | `StreamSplit` | `ScalarSplit` | `Avx2Split` | Ratio (AVX2 vs QF) |
-|-------------------|---------------|---------------|-------------|--------------------|
-| Instructions/msg  | 722           | 1,387         | 1,253       | 1.7× more          |
-| Branches/msg      | 168           | 374           | 271         | 1.6× more          |
-| Cycles/msg        | 3,999         | 353           | 257         | **16× fewer**      |
-| IPC               | 0.18          | 3.93          | 4.88        | **27× higher**     |
-| L1-D misses/msg   | 911           | 0.05          | 0.35        | **~2,600× fewer**  |
+| Metric           | `StreamSplit` | `ScalarSplit` | `Avx2Split` | AVX2 vs QuickFIX |
+|------------------|---------------|---------------|-------------|------------------|
+| Instructions/msg | 722           | 1,387         | 1,253       | 1.7x more        |
+| Branches/msg     | 168           | 374           | 271         | 1.6x more        |
+| Cycles/msg       | 3,999         | 353           | 257         | **16x fewer**    |
+| IPC              | 0.18          | 3.93          | 4.88        | **27x higher**   |
+| L1-D misses/msg  | 911           | 0.05          | 0.35        | **~2,600x fewer** |
 
-Both SwiftFIX splitters are more computationally intensive than QuickFIX but finish in a fraction of the cycles, as they are compute-bound on hot L1 data. QuickFIX is memory-bound: ~900 L1 refills per message (per-frame `std::string` allocations, `FIX::Parser` buffer state, virtual dispatch) × ~12-cycle L2 latency ≈ the entire cycle gap. LLC is cold for all three — `bulk.stream` (~150 KiB) fits in L2. AVX2 narrows the SwiftFIX work further: -10% instructions and -27% cycles vs scalar, almost entirely from the bulk 32-byte SOH pass replacing the per-field byte-by-byte loop and pushing IPC close to 5.
+SwiftFIX does more explicit parsing work per message, but it keeps the CPU fed from hot cache. The QuickFIX splitter is dominated by memory traffic: per-frame allocation, parser buffer movement, and virtual dispatch show up as roughly 900 L1 data misses per message.
 
-### Larger, higher-variance corpus
+### Larger Corpus
 
-Same build, on `corpus/bulk25k.stream` (25,000 messages, ~5.77 MB — exceeds L2). Adds News (`35=B`) with long free-text and deeper Market-Data Incremental (`35=X`) bursts, so mean value length is larger.
+`corpus/bulk25k.stream` contains 25,000 messages and about 5.77 MB of data, with longer News (`35=B`) text and deeper Market Data Incremental (`35=X`) bursts.
 
-| Benchmark              | Per msg  | Throughput   | AVX2 vs Scalar | AVX2 vs QF |
-|------------------------|----------|--------------|----------------|------------|
-| `QuickFIX_StreamSplit` | 91.0 µs  | 2.42 MiB/s   | —              | —          |
-| `SwiftFIX_ScalarSplit` | 135.6 ns | 1.59 GiB/s   | —              | —          |
-| `SwiftFIX_Avx2Split`   | 93.4 ns  | 2.31 GiB/s   | **-31%** time  | **975×**   |
+| Benchmark              | Per msg  | Throughput |
+|------------------------|----------|------------|
+| `QuickFIX_StreamSplit` | 91.0 us  | 2.42 MiB/s |
+| `SwiftFIX_ScalarSplit` | 135.6 ns | 1.59 GiB/s |
+| `SwiftFIX_Avx2Split`   | 93.4 ns  | 2.31 GiB/s |
 
-AVX2's margin over scalar widens from -10% on the small corpus to -31% here — longer values give the bulk SOH pass more runway per SIMD load. The `975× vs QuickFIX` ratio is inflated by scaling: `FIX::Parser::readFixMessage` memmoves the remaining buffer on every dequeue, making its splitter effectively O(N²) in stream size. Use the 1190-message corpus above for an apples-to-apples per-message comparison with QuickFIX.
+The larger corpus is useful for stressing long values and cache behavior. It is not the cleanest QuickFIX comparison because `FIX::Parser::readFixMessage` repeatedly memmoves the remaining stream buffer, which scales poorly with multi-megabyte concatenated inputs.
 
-## Repository layout
+## Build And Test
 
-```
-preparser/       libswiftfix — the pre-parser (scalar + SIMD (WIP) scanners)
-integration/     QuickFIX patches + shim that consumes the FieldIndex
-bench/           Google Benchmark harness against corpus/valid/
-corpus/          Test messages (valid, malformed, edge cases)
-profile/         Phase 0 profiling artifacts (flame graphs, notes)
-docs/            Design docs
-scripts/         Build, bench, profile convenience scripts
-third_party/     QuickFIX pinned as a submodule (v1.15.1)
-```
+Requirements:
 
-## Build
-
-Requires CMake 3.20+, a C++20 compiler (GCC 11+ or Clang 14+), and Python 3 for the corpus generator.
-
-```bash
-git clone --recursive https://example.invalid/swiftfix.git
-cd swiftfix
-scripts/build.sh             # Release build into build/release/
-scripts/build_debug.sh       # Debug + ASan + UBSan into build/debug/
-```
-
-If you cloned without `--recursive`:
+- CMake 3.20+
+- GCC 11+ or Clang 14+
+- Python 3 for corpus generation
+- Initialized QuickFIX submodule
 
 ```bash
 git submodule update --init --recursive
-```
-
-## Test
-
-```bash
+scripts/build.sh
 (cd build/release && ctest --output-on-failure)
 ```
 
-## Bench
-```bash
-scripts/bench.sh             # writes JSON to bench/results/
-```
-
-Baselines per machine are committed under `bench/baseline/`. See its README for naming conventions.
-
-## Regenerating the corpus
-
-`corpus/valid/` is reproducible from `corpus/generate.py`. Edit templates there, then:
+Debug builds enable ASan and UBSan:
 
 ```bash
-python3 corpus/generate.py
+scripts/build_debug.sh
 ```
 
-See `corpus/README.md` for corpus organization, and `docs/embedded_data.md` for the strategy around tag-95/96 edge cases.
+## Benchmark
+
+```bash
+scripts/bench.sh
+```
+
+To benchmark a specific stream corpus:
+
+```bash
+SWIFTFIX_CORPUS=corpus/bulk.stream scripts/bench.sh
+```
+
+To collect hardware counters:
+
+```bash
+SWIFTFIX_CORPUS=corpus/bulk.stream scripts/bench.sh \
+    --benchmark_perf_counters=INSTRUCTIONS,BRANCHES,BRANCH-MISSES,CYCLES
+```
+
+## Project Map
+
+- `preparser/`: scalar and AVX2 scanners plus field-index data structures.
+- `integration/`: QuickFIX patch, shim, and end-to-end integration test.
+- `bench/`: benchmark harness and recorded benchmark outputs.
+- `corpus/`: synthetic valid, malformed, and bulk FIX inputs.
 
 ## License
 
-MIT — see `LICENSE`. Vendored QuickFIX retains its own license, see `third_party/quickfix/LICENSE`.
+MIT. Vendored QuickFIX retains its upstream license.

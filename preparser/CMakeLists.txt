@@ -1,15 +1,18 @@
 # libswiftfix — the pre-parser library.
 
-add_library(swiftfix STATIC
+set(SWIFTFIX_PREPARSER_SOURCES
     src/scanner_scalar.cpp
-    src/scanner_avx2.cpp
     src/dispatch.cpp)
 
-# AVX2 scanner needs -mavx2 regardless of global -march, so the TU compiles
-# on portable builds. Runtime dispatch in dispatch.cpp gates execution on
-# __builtin_cpu_supports("avx2") so non-AVX2 hosts never enter this path.
-set_source_files_properties(src/scanner_avx2.cpp
-    PROPERTIES COMPILE_OPTIONS "-mavx2")
+if(SWIFTFIX_HAVE_AVX2)
+    list(APPEND SWIFTFIX_PREPARSER_SOURCES src/scanner_avx2.cpp)
+    # AVX2 scanner needs -mavx2 regardless of global -march, so the TU
+    # compiles on portable x86 builds. Runtime dispatch gates execution.
+    set_source_files_properties(src/scanner_avx2.cpp
+        PROPERTIES COMPILE_OPTIONS "-mavx2")
+endif()
+
+add_library(swiftfix STATIC ${SWIFTFIX_PREPARSER_SOURCES})
 
 add_library(SwiftFIX::swiftfix ALIAS swiftfix)
 
@@ -22,6 +25,9 @@ target_link_libraries(swiftfix
         SwiftFIX::CompilerFlags
     PRIVATE
         SwiftFIX::Sanitizers)
+
+target_compile_definitions(swiftfix PRIVATE
+    SWIFTFIX_COMPILE_AVX2=$<BOOL:${SWIFTFIX_HAVE_AVX2}>)
 
 set_target_properties(swiftfix PROPERTIES
     OUTPUT_NAME swiftfix
